@@ -70,7 +70,7 @@ jobs:
         working-directory: apps
         shell: pwsh
         run: Compress-Archive -Path 'build/windows/x64/runner/Release/*' -DestinationPath 'VexoStream-Windows.zip' -Force
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: env.APP_KEY != ''
         with:
           name: VexoStream-Windows
