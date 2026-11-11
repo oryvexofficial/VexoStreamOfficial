@@ -12,14 +12,14 @@ test('Worker exposes the app pages through the versioned API', () => {
     "path === '/health'", "path === '/config'", "path === '/catalog'", "path === '/search'",
     "path === '/auth/signup'", "path === '/auth/login'", "path === '/auth/logout'", "path === '/account'",
     "path === '/videos/extract'", "path === '/models'", "path === '/status'", "path === '/social'",
-    "path === '/developers'", "path === '/check-host/start'", "path === '/check-host/result'"
+    "path === '/developers'", "path === '/image'", "path === '/check-host/start'", "path === '/check-host/result'"
   ]) assert.ok(api.includes(route), `missing API contract: ${route}`);
   assert.ok(router.includes('handleAppApiV1(request, url, env, ctx)'));
   assert.ok(router.includes("'Access-Control-Allow-Headers': 'Authorization, Content-Type"));
 });
 
 test('API is routed on the requested subdomain and sessions persist hashes only', () => {
-  assert.ok(wrangler.includes('api.vexostream.bond/*'));
+  assert.ok(/pattern = "api\.vexostream\.bond", custom_domain = true/.test(wrangler));
   assert.ok(migration.includes('token_hash TEXT PRIMARY KEY'));
   assert.ok(migration.includes('revoked_at TEXT'));
   assert.ok(!migration.toLowerCase().includes('token TEXT'));

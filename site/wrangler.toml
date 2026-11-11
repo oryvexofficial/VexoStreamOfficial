@@ -13,7 +13,8 @@ compatibility_flags = ["nodejs_compat", "allow_custom_ports"]
 routes = [
   { pattern = "vexostream.bond/*",     zone_name = "vexostream.bond" },
   { pattern = "www.vexostream.bond/*", zone_name = "vexostream.bond" },
-  { pattern = "api.vexostream.bond/*", zone_name = "vexostream.bond" }
+  # Custom domain: Wrangler creates the DNS record + certificate for the API on deploy.
+  { pattern = "api.vexostream.bond", custom_domain = true }
 ]
 
 # ----------------------------------------------------------------------------

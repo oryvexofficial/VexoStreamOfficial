@@ -15,39 +15,108 @@ class AccountPage extends StatefulWidget {
 class _AccountPageState extends State<AccountPage> {
   bool _loading = true;
   String? _error;
+  ApiException? _apiError;
   Map<String, dynamic> _account = {};
+
   @override
-  void initState() { super.initState(); _load(); }
+  void initState() {
+    super.initState();
+    _load();
+  }
+
   Future<void> _load() async {
-    setState(() { _loading = true; _error = null; });
+    if (!widget.api.hasToken) {
+      setState(() {
+        _loading = false;
+        _error = 'Log in to see your account.';
+        _apiError = const ApiException('', statusCode: 401);
+      });
+      return;
+    }
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
     try {
       final response = asMap(await widget.api.get('/account', authenticated: true));
       _account = asMap(response['account']);
       if (mounted) setState(() => _loading = false);
-    } catch (e) { if (mounted) setState(() { _error = e.toString(); _loading = false; }); }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _error = e.toString();
+          _apiError = e is ApiException ? e : null;
+          _loading = false;
+        });
+      }
+    }
   }
+
   Future<void> _signOut() async {
-    try { await widget.api.post('/auth/logout', authenticated: true); } catch (_) {}
+    try {
+      await widget.api.post('/auth/logout', authenticated: true);
+    } catch (_) {}
     await widget.api.clearToken();
     widget.onSignedOut();
   }
 
   @override
-  Widget build(BuildContext context) => ListView(padding: const EdgeInsets.all(28), children: [
-        const PageHeading(title: 'Account', subtitle: 'Manage your VexoStream app session.'),
-        if (_loading) const SizedBox(height: 220, child: PageLoader(label: 'Loading account…'))
-        else if (_error != null) ErrorPanel(message: _error!, onRetry: _load, action: FilledButton(onPressed: widget.onSignIn, child: const Text('Sign in')))
-        else Center(child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 700), child: Card(child: Padding(padding: const EdgeInsets.all(24), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(children: [CircleAvatar(radius: 28, backgroundColor: vexoPurple.withValues(alpha: .2), child: const Icon(Icons.person, color: vexoPurple, size: 30)), const SizedBox(width: 15), Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text((_account['username'] ?? 'Member').toString(), style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800)), const Text('VexoStream member', style: TextStyle(color: Colors.white54))]))]),
-          const Divider(height: 32),
-          _row('Account ID', (_account['id'] ?? '').toString()),
-          _row('Joined', (_account['createdAt'] ?? 'Unknown').toString()),
-          _row('Last sign-in', (_account['lastLoginAt'] ?? 'Not available').toString()),
-          const SizedBox(height: 15),
-          const Text('Your app session expires after 30 days. Signing out revokes this device session.', style: TextStyle(color: Colors.white60, height: 1.4)),
-          const SizedBox(height: 16),
-          OutlinedButton.icon(onPressed: _signOut, icon: const Icon(Icons.logout_rounded), label: const Text('Sign out')),
-        ]))))),
-      ]);
-  Widget _row(String title, String value) => Padding(padding: const EdgeInsets.symmetric(vertical: 8), child: Row(children: [SizedBox(width: 135, child: Text(title, style: const TextStyle(color: Colors.white54))), Expanded(child: Text(value))]));
+  Widget build(BuildContext context) {
+    final name = (_account['username'] ?? 'Member').toString();
+    return PageBody(maxWidth: 760, children: [
+      const PageHeading(kicker: 'Account', title: 'Your account', subtitle: 'Signed in on this computer.'),
+      if (_loading)
+        const SizedBox(height: 240, child: PageLoader(label: 'Loading account…'))
+      else if (_error != null)
+        SizedBox(
+          height: 340,
+          child: ErrorPanel(
+            message: _error!,
+            onRetry: _apiError?.needsLogin == true ? null : _load,
+            action: FilledButton(onPressed: widget.onSignIn, child: const Text('Log in')),
+          ),
+        )
+      else
+        Container(
+          decoration: Vx.surface(radius: Vx.radius2xl),
+          padding: const EdgeInsets.all(26),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              Container(
+                width: 56,
+                height: 56,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(color: Vx.blue, borderRadius: BorderRadius.circular(18)),
+                child: Text(name.isEmpty ? '?' : name[0].toUpperCase(), style: Vx.sans(size: 24, weight: FontWeight.w700, color: Colors.white)),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(name, style: Theme.of(context).textTheme.titleLarge),
+                  const SizedBox(height: 6),
+                  const StatusPill(label: 'Member', dense: true),
+                ]),
+              ),
+            ]),
+            const SizedBox(height: 22),
+            const Divider(),
+            _row('Account ID', (_account['id'] ?? '').toString()),
+            _row('Joined', '${_account['createdAt'] ?? 'Unknown'} UTC'),
+            _row('Last sign-in', '${_account['lastLoginAt'] ?? 'Not available'} UTC'),
+            const SizedBox(height: 18),
+            Text('App sessions last 30 days. Logging out ends this session right away.', style: Theme.of(context).textTheme.bodyMedium),
+            const SizedBox(height: 18),
+            OutlinedButton.icon(onPressed: _signOut, icon: const Icon(Icons.logout_rounded, size: 18), label: const Text('Log out')),
+          ]),
+        ),
+    ]);
+  }
+
+  Widget _row(String title, String value) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 11),
+        child: Row(children: [
+          SizedBox(width: 140, child: Text(title, style: Vx.sans(size: 14, color: Vx.text3))),
+          Expanded(child: Text(value, style: Vx.mono(size: 13, color: Vx.text))),
+        ]),
+      );
 }

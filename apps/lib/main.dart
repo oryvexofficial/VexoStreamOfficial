@@ -1,5 +1,6 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -31,9 +32,9 @@ class VexoApp extends StatefulWidget {
 class _VexoAppState extends State<VexoApp> {
   final VexoApi _api = VexoApi();
   bool _ready = false;
-  bool _ageAccepted = false;
+  bool _adult = false;
   bool _blocked = false;
-  bool _hasToken = false;
+  bool _signedIn = false;
 
   @override
   void initState() {
@@ -42,20 +43,20 @@ class _VexoAppState extends State<VexoApp> {
   }
 
   Future<void> _init() async {
-    final preferences = await SharedPreferences.getInstance();
+    final prefs = await SharedPreferences.getInstance();
     final token = await _api.loadToken();
     if (!mounted) return;
     setState(() {
       _ready = true;
-      _ageAccepted = preferences.getBool('vexostream.adult.confirmed') == true;
-      _hasToken = token != null && token.isNotEmpty;
+      _adult = prefs.getBool('vexostream.adult.confirmed') == true;
+      _signedIn = (token ?? '').isNotEmpty;
     });
   }
 
   Future<void> _acceptAge() async {
-    final preferences = await SharedPreferences.getInstance();
-    await preferences.setBool('vexostream.adult.confirmed', true);
-    if (mounted) setState(() { _ageAccepted = true; _blocked = false; });
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('vexostream.adult.confirmed', true);
+    if (mounted) setState(() => _adult = true);
   }
 
   @override
@@ -63,14 +64,23 @@ class _VexoAppState extends State<VexoApp> {
         title: 'VexoStream',
         debugShowCheckedModeBanner: false,
         theme: buildVexoTheme(),
+        darkTheme: buildVexoTheme(),
+        themeMode: ThemeMode.dark,
         home: !_ready
-            ? const Scaffold(body: PageLoader(label: 'Starting VexoStream…'))
+            ? const Scaffold(body: Center(child: _BrandMark(size: 64)))
             : _blocked
                 ? const _AgeBlockedPage()
-                : !_ageAccepted
+                : !_adult
                     ? _AgeGate(onAccept: _acceptAge, onReject: () => setState(() => _blocked = true))
-                    : VexoShell(api: _api, hasToken: _hasToken, onTokenChanged: (value) => setState(() => _hasToken = value)),
+                    : VexoShell(api: _api, signedIn: _signedIn, onSessionChanged: (v) => setState(() => _signedIn = v)),
       );
+}
+
+class _BrandMark extends StatelessWidget {
+  const _BrandMark({this.size = 32});
+  final double size;
+  @override
+  Widget build(BuildContext context) => Image.asset('assets/brand/vexostream-mark-512.png', width: size, height: size, filterQuality: FilterQuality.medium);
 }
 
 class _AgeGate extends StatelessWidget {
@@ -79,49 +89,140 @@ class _AgeGate extends StatelessWidget {
   final VoidCallback onReject;
 
   @override
-  Widget build(BuildContext context) => Scaffold(body: Center(child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 620), child: Card(child: Padding(padding: const EdgeInsets.all(34), child: Column(mainAxisSize: MainAxisSize.min, children: [
-        Image.asset('assets/brand/vexostream-logo.png', height: 52, errorBuilder: (_, __, ___) => const Text('VexoStream', style: TextStyle(fontSize: 30, fontWeight: FontWeight.w900))),
-        const SizedBox(height: 25),
-        const Icon(Icons.lock_rounded, size: 52, color: vexoPink),
-        const SizedBox(height: 14),
-        Text('Adults only', style: Theme.of(context).textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.w900)),
-        const SizedBox(height: 10),
-        const Text('This app is intended only for adults aged 18 or older. By continuing, you confirm you meet the legal age requirement where you live and agree to use the app responsibly.', textAlign: TextAlign.center, style: TextStyle(color: Colors.white70, height: 1.5)),
-        const SizedBox(height: 24),
-        Row(mainAxisAlignment: MainAxisAlignment.center, children: [FilledButton(onPressed: onAccept, child: const Text('I am 18 or older')), const SizedBox(width: 12), OutlinedButton(onPressed: onReject, child: const Text('Exit'))]),
-      ]))))));
+  Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+    return Scaffold(
+      body: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 480),
+          child: Container(
+            margin: const EdgeInsets.all(24),
+            padding: const EdgeInsets.fromLTRB(34, 36, 34, 30),
+            decoration: BoxDecoration(
+              color: Vx.panel,
+              borderRadius: BorderRadius.circular(Vx.radius2xl),
+              border: Border.all(color: Vx.line),
+              boxShadow: const [BoxShadow(color: Color(0xE6000000), blurRadius: 50, offset: Offset(0, 26), spreadRadius: -24)],
+            ),
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              const _BrandMark(size: 60),
+              const SizedBox(height: 22),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                decoration: BoxDecoration(color: Vx.red.withValues(alpha: .12), borderRadius: BorderRadius.circular(999)),
+                child: Text('18+', style: Vx.mono(size: 13, weight: FontWeight.w600, color: Vx.red, spacing: 1)),
+              ),
+              const SizedBox(height: 16),
+              Text('Adults only', style: t.headlineMedium),
+              const SizedBox(height: 10),
+              Text(
+                'VexoStream shows adult content. Continue only if you are 18 or older and it is legal where you live.',
+                textAlign: TextAlign.center,
+                style: t.bodyMedium?.copyWith(fontSize: 15),
+              ),
+              const SizedBox(height: 26),
+              FilledButton(onPressed: onAccept, style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(50)), child: const Text('I am 18 or older, enter')),
+              const SizedBox(height: 10),
+              TextButton(onPressed: onReject, child: Text('Leave', style: Vx.sans(size: 14, color: Vx.text3))),
+            ]),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _AgeBlockedPage extends StatelessWidget {
   const _AgeBlockedPage();
   @override
-  Widget build(BuildContext context) => Scaffold(body: Center(child: Column(mainAxisSize: MainAxisSize.min, children: [const Icon(Icons.lock_outline, size: 44, color: Colors.white54), const SizedBox(height: 14), const Text('VexoStream is for adults only.', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700)), const SizedBox(height: 14), OutlinedButton(onPressed: SystemNavigator.pop, child: const Text('Close app'))])));
+  Widget build(BuildContext context) => Scaffold(
+        body: ErrorPanel(
+          title: 'VexoStream is for adults only.',
+          message: 'You can close the app now.',
+          icon: Icons.lock_outline_rounded,
+          action: OutlinedButton(onPressed: () => exit(0), child: const Text('Close app')),
+        ),
+      );
 }
 
+enum _Page { home, browse, models, social, developers, status, checkHost, account }
+
 class VexoShell extends StatefulWidget {
-  const VexoShell({super.key, required this.api, required this.hasToken, required this.onTokenChanged});
+  const VexoShell({super.key, required this.api, required this.signedIn, required this.onSessionChanged});
   final VexoApi api;
-  final bool hasToken;
-  final ValueChanged<bool> onTokenChanged;
+  final bool signedIn;
+  final ValueChanged<bool> onSessionChanged;
   @override
   State<VexoShell> createState() => _VexoShellState();
 }
 
 class _VexoShellState extends State<VexoShell> {
-  int _selected = 0;
-  String _searchQuery = '';
-  String _searchProvider = '';
-  int _catalogRefresh = 0;
-  int _accountRefresh = 0;
+  _Page _page = _Page.home;
+  String _query = '';
+  String _provider = '';
+  int _browseKey = 0;
+  int _accountKey = 0;
+  List<Map<String, dynamic>> _providers = [];
+  String _username = '';
+  final _search = TextEditingController();
 
-  static const _titles = ['Home', 'Browse', 'Performers', 'System status', 'Social', 'Developers', 'Check host', 'Account'];
-  static const _icons = [Icons.home_rounded, Icons.video_library_rounded, Icons.people_alt_rounded, Icons.monitor_heart_rounded, Icons.forum_rounded, Icons.code_rounded, Icons.dns_rounded, Icons.person_rounded];
+  static const _nav = [
+    (_Page.home, 'Home', Icons.home_outlined, Icons.home_rounded),
+    (_Page.browse, 'Browse', Icons.video_library_outlined, Icons.video_library_rounded),
+    (_Page.models, 'Models', Icons.people_alt_outlined, Icons.people_alt_rounded),
+    (_Page.social, 'Social media', Icons.forum_outlined, Icons.forum_rounded),
+    (_Page.developers, 'Developers', Icons.code_rounded, Icons.code_rounded),
+    (_Page.status, 'Status', Icons.monitor_heart_outlined, Icons.monitor_heart_rounded),
+    (_Page.checkHost, 'Check host', Icons.dns_outlined, Icons.dns_rounded),
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadProviders();
+    _loadAccount();
+  }
+
+  @override
+  void didUpdateWidget(covariant VexoShell oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.signedIn != widget.signedIn) _loadAccount();
+  }
+
+  @override
+  void dispose() {
+    _search.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadProviders() async {
+    try {
+      final config = asMap(await widget.api.get('/config'));
+      if (mounted) setState(() => _providers = asList(config['providers']).map(asMap).toList());
+    } catch (_) {}
+  }
+
+  Future<void> _loadAccount() async {
+    if (!widget.signedIn) {
+      if (mounted) setState(() => _username = '');
+      return;
+    }
+    try {
+      final data = asMap(await widget.api.get('/account', authenticated: true));
+      if (mounted) setState(() => _username = (asMap(data['account'])['username'] ?? '').toString());
+    } on ApiException catch (e) {
+      if (e.needsLogin) {
+        await widget.api.clearToken();
+        widget.onSessionChanged(false);
+      }
+    } catch (_) {}
+  }
 
   Future<void> _openAuth({bool signup = false}) async {
     final ok = await Navigator.of(context).push<bool>(MaterialPageRoute(builder: (_) => AuthPage(api: widget.api, initialSignup: signup)));
     if (ok == true && mounted) {
-      widget.onTokenChanged(true);
-      setState(() { _selected = 7; _accountRefresh++; });
+      widget.onSessionChanged(true);
+      setState(() => _accountKey++);
     }
   }
 
@@ -129,65 +230,205 @@ class _VexoShellState extends State<VexoShell> {
     Navigator.of(context).push(MaterialPageRoute(builder: (_) => PlayerPage(api: widget.api, video: video, onSignIn: () => _openAuth())));
   }
 
-  void _openBrowse() {
-    setState(() { _selected = 1; _searchQuery = ''; _searchProvider = ''; _catalogRefresh++; });
-  }
-
-  void _startSearch(String query, String provider) {
+  void _browse(String provider, {String query = ''}) {
     setState(() {
-      _searchQuery = query;
-      _searchProvider = provider;
-      _catalogRefresh++;
-      _selected = 1;
+      _provider = provider;
+      _query = query;
+      _browseKey++;
+      _page = _Page.browse;
     });
   }
 
-  Widget _page() {
-    switch (_selected) {
-      case 0:
-        return HomePage(api: widget.api, onPlay: _openPlayer, onBrowse: _openBrowse, onSearch: _startSearch);
-      case 1:
-        return CatalogPage(key: ValueKey('catalog-$_catalogRefresh'), api: widget.api, onPlay: _openPlayer, initialQuery: _searchQuery, initialProvider: _searchProvider);
-      case 2:
-        return ModelsPage(api: widget.api, onSignIn: () => _openAuth());
-      case 3:
-        return StatusPage(api: widget.api);
-      case 4:
-        return SocialPage(api: widget.api);
-      case 5:
-        return DevelopersPage(api: widget.api);
-      case 6:
-        return CheckHostPage(api: widget.api);
-      case 7:
-        return AccountPage(key: ValueKey('account-$_accountRefresh'), api: widget.api, onSignIn: () => _openAuth(), onSignedOut: () { widget.onTokenChanged(false); setState(() => _selected = 0); });
-      default:
-        return HomePage(api: widget.api, onPlay: _openPlayer, onBrowse: _openBrowse, onSearch: _startSearch);
-    }
+  void _go(_Page page) {
+    if (page == _Page.browse) return _browse(_provider);
+    setState(() => _page = page);
   }
 
-  @override
-  Widget build(BuildContext context) => LayoutBuilder(builder: (context, constraints) {
-        final extended = constraints.maxWidth >= 1160;
-        return Scaffold(
-          appBar: AppBar(
-            title: Row(children: [Image.asset('assets/brand/vexostream-mark-512.png', width: 30, height: 30, errorBuilder: (_, __, ___) => const Icon(Icons.play_circle_fill, color: vexoPurple)), const SizedBox(width: 10), const Text('VexoStream', style: TextStyle(fontWeight: FontWeight.w800, letterSpacing: -.3)), const SizedBox(width: 14), Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4), decoration: BoxDecoration(color: vexoPink.withValues(alpha: .12), borderRadius: BorderRadius.circular(20)), child: const Text('18+', style: TextStyle(color: Color(0xFFFF8DBA), fontSize: 10, fontWeight: FontWeight.w800))) ]),
-            actions: [
-              if (widget.hasToken) IconButton(tooltip: 'Account', onPressed: () => setState(() => _selected = 7), icon: const Icon(Icons.account_circle_outlined))
-              else TextButton.icon(onPressed: () => _openAuth(), icon: const Icon(Icons.login_rounded), label: const Text('Sign in')),
-              const SizedBox(width: 12),
-            ],
+  Widget _body() => switch (_page) {
+        _Page.home => HomePage(api: widget.api, onPlay: _openPlayer, onBrowse: (p) => _browse(p), onSearch: (q, p) => _browse(p, query: q)),
+        _Page.browse => CatalogPage(key: ValueKey('browse-$_browseKey'), api: widget.api, onPlay: _openPlayer, initialQuery: _query, initialProvider: _provider),
+        _Page.models => ModelsPage(api: widget.api, onSignIn: () => _openAuth()),
+        _Page.social => SocialPage(api: widget.api),
+        _Page.developers => DevelopersPage(api: widget.api),
+        _Page.status => StatusPage(api: widget.api),
+        _Page.checkHost => CheckHostPage(api: widget.api),
+        _Page.account => AccountPage(
+            key: ValueKey('account-$_accountKey-${widget.signedIn}'),
+            api: widget.api,
+            onSignIn: () => _openAuth(),
+            onSignedOut: () {
+              widget.onSessionChanged(false);
+              setState(() => _page = _Page.home);
+            },
           ),
-          body: Row(children: [
-            NavigationRail(
-              extended: extended,
-              selectedIndex: _selected,
-              onDestinationSelected: (index) => setState(() => _selected = index),
-              leading: Padding(padding: const EdgeInsets.only(bottom: 18), child: Tooltip(message: 'VexoStream', child: Container(width: 44, height: 44, decoration: BoxDecoration(gradient: const LinearGradient(colors: [vexoPurple, vexoPink]), borderRadius: BorderRadius.circular(14)), child: const Icon(Icons.play_arrow_rounded, color: Colors.white, size: 28)))),
-              destinations: List.generate(_titles.length, (i) => NavigationRailDestination(icon: Icon(_icons[i]), selectedIcon: Icon(_icons[i]), label: Text(_titles[i]))),
+      };
+
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(builder: (context, c) {
+        final wide = c.maxWidth >= 1100;
+        return Scaffold(
+          body: Column(children: [
+            _topBar(wide),
+            Expanded(
+              child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                _sidebar(wide),
+                Expanded(
+                  child: AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 260),
+                    switchInCurve: Vx.ease,
+                    transitionBuilder: (child, a) => FadeTransition(opacity: a, child: ScaleTransition(scale: Tween(begin: .985, end: 1.0).animate(a), child: child)),
+                    child: KeyedSubtree(key: ValueKey('${_page.name}-$_browseKey-$_accountKey'), child: _body()),
+                  ),
+                ),
+              ]),
             ),
-            const VerticalDivider(width: 1, thickness: 1),
-            Expanded(child: _page()),
           ]),
         );
       });
+
+  Widget _topBar(bool wide) => Container(
+        height: 64,
+        padding: const EdgeInsets.symmetric(horizontal: 20),
+        decoration: const BoxDecoration(color: Vx.bg, border: Border(bottom: BorderSide(color: Vx.line))),
+        child: Row(children: [
+          MouseRegion(
+            cursor: SystemMouseCursors.click,
+            child: GestureDetector(
+              onTap: () => _go(_Page.home),
+              child: wide ? Image.asset('assets/brand/vexostream-logo-dark.png', height: 26) : const _BrandMark(size: 30),
+            ),
+          ),
+          const SizedBox(width: 24),
+          Expanded(
+            child: Align(
+              alignment: Alignment.center,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 560),
+                child: SizedBox(
+                  height: 40,
+                  child: TextField(
+                    controller: _search,
+                    onSubmitted: (q) {
+                      final query = q.trim();
+                      if (query.isNotEmpty) _browse(_provider, query: query);
+                    },
+                    style: Vx.sans(size: 14),
+                    decoration: const InputDecoration(
+                      hintText: 'Search videos',
+                      contentPadding: EdgeInsets.symmetric(horizontal: 16),
+                      prefixIcon: Padding(padding: EdgeInsets.only(left: 6), child: Icon(Icons.search_rounded, size: 18)),
+                      prefixIconConstraints: BoxConstraints(minWidth: 40, minHeight: 40),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 18),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+            decoration: BoxDecoration(color: Vx.red.withValues(alpha: .12), borderRadius: BorderRadius.circular(999)),
+            child: Text('18+', style: Vx.mono(size: 12, weight: FontWeight.w600, color: Vx.red)),
+          ),
+          const SizedBox(width: 12),
+          if (widget.signedIn)
+            Tooltip(
+              message: _username.isEmpty ? 'Account' : _username,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(12),
+                onTap: () => setState(() => _page = _Page.account),
+                child: Container(
+                  width: 36,
+                  height: 36,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(color: Vx.blue, borderRadius: BorderRadius.circular(12)),
+                  child: Text(_username.isEmpty ? '•' : _username[0].toUpperCase(), style: Vx.sans(size: 16, weight: FontWeight.w700, color: Colors.white)),
+                ),
+              ),
+            )
+          else ...[
+            TextButton(onPressed: () => _openAuth(), child: Text('Log in', style: Vx.sans(size: 14, weight: FontWeight.w500, color: Vx.text))),
+            const SizedBox(width: 6),
+            FilledButton(onPressed: () => _openAuth(signup: true), style: FilledButton.styleFrom(minimumSize: const Size(0, 38)), child: const Text('Sign up')),
+          ],
+        ]),
+      );
+
+  Widget _sidebar(bool wide) {
+    final live = _providers.where((p) => p['available'] == true).toList();
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 300),
+      curve: Vx.ease,
+      width: wide ? 248 : 76,
+      decoration: const BoxDecoration(color: Vx.bg, border: Border(right: BorderSide(color: Vx.line))),
+      child: ListView(padding: const EdgeInsets.fromLTRB(12, 16, 12, 16), children: [
+        for (final item in _nav) _NavItem(label: item.$2, icon: item.$3, activeIcon: item.$4, active: _page == item.$1, wide: wide, onTap: () => _go(item.$1)),
+        if (live.isNotEmpty) ...[
+          const SizedBox(height: 18),
+          if (wide)
+            Padding(padding: const EdgeInsets.fromLTRB(12, 0, 12, 10), child: Text('LIBRARIES', style: Vx.mono(size: 11, spacing: 1.4)))
+          else
+            const Padding(padding: EdgeInsets.symmetric(vertical: 8, horizontal: 14), child: Divider()),
+          for (final p in live)
+            _NavItem(
+              label: (p['name'] ?? '').toString(),
+              leading: ProviderIcon(id: (p['id'] ?? '').toString(), name: (p['name'] ?? '').toString(), size: 24),
+              active: _page == _Page.browse && _provider == p['id'] && _query.isEmpty,
+              wide: wide,
+              onTap: () => _browse((p['id'] ?? '').toString()),
+            ),
+        ],
+        const SizedBox(height: 18),
+        _NavItem(label: widget.signedIn ? 'Account' : 'Log in', icon: Icons.person_outline_rounded, activeIcon: Icons.person_rounded, active: _page == _Page.account, wide: wide, onTap: () => widget.signedIn ? setState(() => _page = _Page.account) : _openAuth()),
+      ]),
+    );
+  }
+}
+
+class _NavItem extends StatefulWidget {
+  const _NavItem({required this.label, required this.active, required this.wide, required this.onTap, this.icon, this.activeIcon, this.leading});
+  final String label;
+  final IconData? icon;
+  final IconData? activeIcon;
+  final Widget? leading;
+  final bool active;
+  final bool wide;
+  final VoidCallback onTap;
+  @override
+  State<_NavItem> createState() => _NavItemState();
+}
+
+class _NavItemState extends State<_NavItem> {
+  bool _hover = false;
+  @override
+  Widget build(BuildContext context) {
+    final color = widget.active ? Vx.text : (_hover ? Vx.text : Vx.text2);
+    final leading = widget.leading ?? Icon(widget.active ? widget.activeIcon : widget.icon, size: 20, color: widget.active ? Vx.blue : color);
+    final tile = MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          height: 42,
+          margin: const EdgeInsets.only(bottom: 2),
+          padding: EdgeInsets.symmetric(horizontal: widget.wide ? 12 : 0),
+          decoration: BoxDecoration(
+            color: widget.active ? Vx.well2 : (_hover ? Vx.well : Colors.transparent),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Row(mainAxisAlignment: widget.wide ? MainAxisAlignment.start : MainAxisAlignment.center, children: [
+            leading,
+            if (widget.wide) ...[
+              const SizedBox(width: 12),
+              Expanded(child: Text(widget.label, maxLines: 1, overflow: TextOverflow.ellipsis, style: Vx.sans(size: 14, weight: FontWeight.w500, color: color))),
+            ],
+          ]),
+        ),
+      ),
+    );
+    return widget.wide ? tile : Tooltip(message: widget.label, waitDuration: const Duration(milliseconds: 400), child: tile);
+  }
 }

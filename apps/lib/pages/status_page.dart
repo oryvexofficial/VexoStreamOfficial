@@ -14,31 +14,123 @@ class _StatusPageState extends State<StatusPage> {
   bool _loading = true;
   String? _error;
   Map<String, dynamic> _status = {};
+
+  static const _labels = {'edge': 'Edge network', 'extract': 'Video API', 'proxy': 'Stream proxy', 'telegram': 'Telegram bot', 'admin': 'Accounts & database'};
+
   @override
-  void initState() { super.initState(); _load(); }
+  void initState() {
+    super.initState();
+    _load();
+  }
+
   Future<void> _load() async {
-    setState(() { _loading = true; _error = null; });
-    try { _status = asMap(await widget.api.get('/status')); if (mounted) setState(() => _loading = false); }
-    catch (e) { if (mounted) setState(() { _error = e.toString(); _loading = false; }); }
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      _status = asMap(await widget.api.get('/status'));
+      if (mounted) setState(() => _loading = false);
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _error = e.toString();
+          _loading = false;
+        });
+      }
+    }
   }
 
   @override
-  Widget build(BuildContext context) => ListView(padding: const EdgeInsets.all(28), children: [
-        PageHeading(title: 'System status', subtitle: 'Live health checks for the Worker, extraction backend, and enabled libraries.', trailing: IconButton(onPressed: _load, tooltip: 'Refresh', icon: const Icon(Icons.refresh_rounded))),
-        if (_loading) const SizedBox(height: 240, child: PageLoader(label: 'Checking VexoStream…'))
-        else if (_error != null) ErrorPanel(message: _error!, onRetry: _load)
-        else ...[
-          Card(child: Padding(padding: const EdgeInsets.all(22), child: Row(children: [Icon(_status['overall'] == 'operational' ? Icons.check_circle_rounded : Icons.warning_rounded, color: _color((_status['overall'] ?? '').toString()), size: 32), const SizedBox(width: 14), Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('Overall: ${_human((_status['overall'] ?? 'unknown').toString())}', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 18)), Text('Checked ${_time(_status['checked_at'])}', style: const TextStyle(color: Colors.white54))]))]))),
-          const SizedBox(height: 14),
-          Wrap(spacing: 12, runSpacing: 12, children: _status.entries.where((e) => e.key != 'overall' && e.key != 'checked_at' && e.value is String).map((entry) => SizedBox(width: 230, child: Card(child: Padding(padding: const EdgeInsets.all(16), child: Row(children: [Icon(Icons.circle, size: 12, color: _color(entry.value.toString())), const SizedBox(width: 12), Expanded(child: Text(_human(entry.key), style: const TextStyle(fontWeight: FontWeight.w700))), Text(_human(entry.value.toString()), style: TextStyle(color: _color(entry.value.toString()), fontSize: 12))]))))).toList()),
-          const SizedBox(height: 22),
-          const Text('Video libraries', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 20)),
-          const SizedBox(height: 10),
-          ...asList(_status['providers']).map((raw) { final p = asMap(raw); final available = p['available'] == true; return Card(child: ListTile(leading: Icon(available ? Icons.check_circle : Icons.pause_circle, color: available ? Colors.greenAccent : Colors.orangeAccent), title: Text((p['name'] ?? p['id'] ?? 'Library').toString()), trailing: Text(available ? 'Available' : _human((p['status'] ?? 'unavailable').toString()), style: TextStyle(color: available ? Colors.greenAccent : Colors.orangeAccent)))); }),
-        ],
-      ]);
+  Widget build(BuildContext context) {
+    final overall = (_status['overall'] ?? 'operational').toString();
+    return PageBody(maxWidth: 980, children: [
+      PageHeading(
+        kicker: 'Status',
+        title: 'System status',
+        subtitle: 'Live health for every part of VexoStream.',
+        trailing: OutlinedButton.icon(onPressed: _loading ? null : _load, icon: const Icon(Icons.refresh_rounded, size: 18), label: const Text('Refresh')),
+      ),
+      if (_loading)
+        const SizedBox(height: 260, child: PageLoader(label: 'Checking VexoStream…'))
+      else if (_error != null)
+        SizedBox(height: 320, child: ErrorPanel(message: _error!, onRetry: _load))
+      else ...[
+        Container(
+          padding: const EdgeInsets.all(24),
+          decoration: BoxDecoration(
+            color: _color(overall).withValues(alpha: .08),
+            borderRadius: BorderRadius.circular(Vx.radius2xl),
+            border: Border.all(color: _color(overall).withValues(alpha: .3)),
+          ),
+          child: Row(children: [
+            Icon(overall == 'operational' ? Icons.check_circle_rounded : Icons.error_rounded, color: _color(overall), size: 32),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(overall == 'operational' ? 'All systems operational' : _human(overall), style: Theme.of(context).textTheme.titleLarge),
+                const SizedBox(height: 4),
+                Text('Checked ${_time(_status['checked_at'])}', style: Vx.mono(size: 12)),
+              ]),
+            ),
+          ]),
+        ),
+        const SizedBox(height: 24),
+        Container(
+          decoration: Vx.surface(),
+          child: Column(children: [
+            for (final (i, entry) in _status.entries.where((e) => _labels.containsKey(e.key)).indexed) ...[
+              if (i > 0) const Divider(),
+              _row(_labels[entry.key]!, entry.value.toString()),
+            ],
+          ]),
+        ),
+        const SizedBox(height: 32),
+        const PageHeading(title: 'Libraries', large: false),
+        Container(
+          decoration: Vx.surface(),
+          child: Column(children: [
+            for (final (i, raw) in asList(_status['providers']).indexed) ...[
+              if (i > 0) const Divider(),
+              Builder(builder: (_) {
+                final p = asMap(raw);
+                final on = p['available'] == true;
+                return Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+                  child: Row(children: [
+                    ProviderIcon(id: (p['id'] ?? '').toString(), name: (p['name'] ?? '').toString(), size: 30),
+                    const SizedBox(width: 14),
+                    Expanded(child: Text((p['name'] ?? p['id'] ?? 'Library').toString(), style: Vx.sans(size: 15, weight: FontWeight.w500))),
+                    StatusPill(label: on ? 'Operational' : 'Unavailable', color: on ? Vx.green : Vx.amber, dense: true),
+                  ]),
+                );
+              }),
+            ],
+          ]),
+        ),
+      ],
+    ]);
+  }
+
+  Widget _row(String name, String value) => Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 15),
+        child: Row(children: [
+          Expanded(child: Text(name, style: Vx.sans(size: 15, weight: FontWeight.w500))),
+          StatusPill(label: _human(value), color: _color(value), dense: true),
+        ]),
+      );
 
   String _human(String value) => value.replaceAll('_', ' ').split(' ').map((x) => x.isEmpty ? x : '${x[0].toUpperCase()}${x.substring(1)}').join(' ');
-  Color _color(String value) => value == 'operational' ? Colors.greenAccent : value == 'degraded' ? Colors.amberAccent : Colors.redAccent;
-  String _time(dynamic value) { final date = value is num ? DateTime.fromMillisecondsSinceEpoch(value.toInt()) : DateTime.tryParse((value ?? '').toString()); return date == null ? 'recently' : date.toLocal().toString().split('.').first; }
+  Color _color(String value) => switch (value) {
+        'operational' => Vx.green,
+        'degraded' => Vx.amber,
+        _ => Vx.red,
+      };
+  String _time(dynamic value) {
+    final date = value is num ? DateTime.fromMillisecondsSinceEpoch(value.toInt()) : DateTime.tryParse((value ?? '').toString());
+    if (date == null) return 'just now';
+    final l = date.toLocal();
+    String two(int n) => n.toString().padLeft(2, '0');
+    return '${l.year}-${two(l.month)}-${two(l.day)} ${two(l.hour)}:${two(l.minute)}';
+  }
 }

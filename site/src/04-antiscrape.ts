@@ -77,7 +77,8 @@ async function isApiCallerAllowed(request, url) {
 // --------------------------------------------------------------------------- rate limit
 const __rate = new Map();
 function rateBucketFor(path) {
-    if (path === '/api/extract') return 'extract';
+    if (path === '/api/extract' || path === '/api/v1/videos/extract') return 'extract';
+    if (path === '/api/v1/image') return 'image';
     if (path === '/proxy-m3u8' || path === '/proxy-video') return 'media';
     if (path === '/proxy-image') return 'image';
     if (path.startsWith('/api/')) return 'api';

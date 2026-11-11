@@ -16,99 +16,171 @@ class CatalogPage extends StatefulWidget {
 }
 
 class _CatalogPageState extends State<CatalogPage> {
-  final _queryController = TextEditingController();
-  List<dynamic> _providers = [];
-  List<dynamic> _videos = [];
+  final _query = TextEditingController();
+  List<Map<String, dynamic>> _providers = [];
+  List<Map<String, dynamic>> _videos = [];
   String _provider = '';
-  String _query = '';
+  String _q = '';
   int _page = 1;
   bool _loading = true;
   String? _error;
-  bool _hasMore = false;
 
   @override
   void initState() {
     super.initState();
-    _query = widget.initialQuery;
-    _queryController.text = _query;
+    _q = widget.initialQuery;
+    _query.text = _q;
     _provider = widget.initialProvider;
-    _loadConfigAndResults();
+    _init();
   }
 
   @override
   void dispose() {
-    _queryController.dispose();
+    _query.dispose();
     super.dispose();
   }
 
-  Future<void> _loadConfigAndResults() async {
+  Future<void> _init() async {
     try {
       final config = asMap(await widget.api.get('/config'));
-      _providers = asList(config['providers']);
-      if (_provider.isEmpty) _provider = (config['defaultProvider'] ?? '').toString();
-      if (mounted) setState(() {});
+      _providers = asList(config['providers']).map(asMap).where((p) => p['available'] == true).toList();
+      if (_provider.isEmpty || !_providers.any((p) => p['id'] == _provider)) _provider = (config['defaultProvider'] ?? '').toString();
       await _load();
     } catch (e) {
-      if (mounted) setState(() { _error = e.toString(); _loading = false; });
+      if (mounted) {
+        setState(() {
+          _error = e.toString();
+          _loading = false;
+        });
+      }
     }
   }
 
   Future<void> _load() async {
     if (_provider.isEmpty) {
-      setState(() { _loading = false; _videos = []; _error = null; });
+      setState(() {
+        _loading = false;
+        _videos = [];
+      });
       return;
     }
-    setState(() { _loading = true; _error = null; });
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
     try {
-      final result = await widget.api.get('/catalog', query: {'provider': _provider, 'q': _query.isEmpty ? 'trending' : _query, 'page': _page});
-      final map = asMap(result);
-      _videos = result is List ? result : asList(map['videos'] ?? map['results'] ?? map['items'] ?? map['data']);
-      _hasMore = map['has_more'] == true || map['hasMore'] == true || (_videos.length >= 20);
+      final result = await widget.api.get('/catalog', query: {'provider': _provider, 'q': _q.isEmpty ? 'trending' : _q, 'page': _page});
+      _videos = videoItems(result);
       if (mounted) setState(() => _loading = false);
     } catch (e) {
-      if (mounted) setState(() { _error = e.toString(); _loading = false; });
+      if (mounted) {
+        setState(() {
+          _error = e.toString();
+          _loading = false;
+        });
+      }
     }
   }
 
-  void _submitSearch() {
-    setState(() { _query = _queryController.text.trim(); _page = 1; });
+  void _search() {
+    setState(() {
+      _q = _query.text.trim();
+      _page = 1;
+    });
     _load();
   }
 
+  String get _providerName {
+    for (final p in _providers) {
+      if (p['id'] == _provider) return (p['name'] ?? _provider).toString();
+    }
+    return _provider;
+  }
+
   @override
-  Widget build(BuildContext context) => Column(children: [
-        Padding(padding: const EdgeInsets.fromLTRB(28, 28, 28, 0), child: Column(children: [
-          PageHeading(title: _query.isEmpty ? 'Browse videos' : 'Search results', subtitle: _query.isEmpty ? 'Choose a library, then explore its latest catalog.' : 'Showing matches for “$_query”.'),
-          Row(children: [
-            Expanded(child: TextField(controller: _queryController, onSubmitted: (_) => _submitSearch(), decoration: const InputDecoration(hintText: 'Search videos', prefixIcon: Icon(Icons.search_rounded)))),
-            const SizedBox(width: 10),
-            FilledButton.icon(onPressed: _submitSearch, icon: const Icon(Icons.search_rounded), label: const Text('Search')),
-          ]),
-          const SizedBox(height: 16),
-          if (_providers.isNotEmpty) SizedBox(height: 45, child: ListView.separated(scrollDirection: Axis.horizontal, itemCount: _providers.length, separatorBuilder: (_, __) => const SizedBox(width: 8), itemBuilder: (context, i) {
-            final p = asMap(_providers[i]);
-            final id = (p['id'] ?? '').toString();
-            return ChoiceChip(label: Text((p['name'] ?? id).toString()), selected: _provider == id, onSelected: (_) { setState(() { _provider = id; _page = 1; }); _load(); });
-          })),
-          const SizedBox(height: 10),
-        ])),
-        Expanded(child: _loading ? const PageLoader(label: 'Loading videos…') : _error != null
-            ? ErrorPanel(message: _error!, onRetry: _load)
-            : _videos.isEmpty
-                ? const Center(child: Text('No videos found. Try another search or library.', style: TextStyle(color: Colors.white60)))
-                : LayoutBuilder(builder: (context, constraints) {
-                    final count = constraints.maxWidth > 1450 ? 5 : constraints.maxWidth > 1050 ? 4 : constraints.maxWidth > 720 ? 3 : constraints.maxWidth > 480 ? 2 : 1;
-                    return GridView.builder(
-                      padding: const EdgeInsets.fromLTRB(28, 4, 28, 24),
-                      itemCount: _videos.length,
-                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: count, crossAxisSpacing: 16, mainAxisSpacing: 16, childAspectRatio: count == 1 ? 1.35 : 1.22),
-                      itemBuilder: (context, index) { final item = asMap(_videos[index]); return VideoCard(video: item, onTap: () => widget.onPlay(item)); },
-                    );
-                  })),
-        if (!_loading && _error == null) Padding(padding: const EdgeInsets.fromLTRB(28, 0, 28, 20), child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-          OutlinedButton.icon(onPressed: _page > 1 ? () { setState(() => _page--); _load(); } : null, icon: const Icon(Icons.chevron_left), label: const Text('Previous')),
-          Padding(padding: const EdgeInsets.symmetric(horizontal: 18), child: Text('Page $_page', style: const TextStyle(color: Colors.white70))),
-          OutlinedButton.icon(onPressed: _hasMore ? () { setState(() => _page++); _load(); } : null, icon: const Icon(Icons.chevron_right), label: const Text('Next')),
-        ])),
-      ]);
+  Widget build(BuildContext context) {
+    final searching = _q.isNotEmpty;
+    return PageBody(children: [
+      PageHeading(
+        kicker: searching ? 'Search' : 'Browse',
+        title: searching ? '“$_q”' : 'Trending on $_providerName',
+        subtitle: searching ? 'Results from $_providerName · page $_page' : 'No ads, every quality from 240p to 4K · page $_page',
+      ),
+      Row(children: [
+        Expanded(
+          child: TextField(
+            controller: _query,
+            onSubmitted: (_) => _search(),
+            decoration: InputDecoration(
+              hintText: 'Search videos',
+              prefixIcon: const Padding(padding: EdgeInsets.only(left: 8), child: Icon(Icons.search_rounded)),
+              suffixIcon: _q.isEmpty
+                  ? null
+                  : IconButton(
+                      tooltip: 'Clear search',
+                      onPressed: () {
+                        _query.clear();
+                        _search();
+                      },
+                      icon: const Icon(Icons.close_rounded, size: 18),
+                    ),
+            ),
+          ),
+        ),
+        const SizedBox(width: 10),
+        FilledButton(onPressed: _search, style: FilledButton.styleFrom(minimumSize: const Size(110, 52)), child: const Text('Search')),
+      ]),
+      const SizedBox(height: 16),
+      if (_providers.length > 1)
+        Align(
+          alignment: Alignment.centerLeft,
+          child: PillTabs<String>(
+            items: [for (final p in _providers) ((p['id'] ?? '').toString(), (p['name'] ?? '').toString())],
+            value: _provider,
+            iconFor: (id) => ProviderIcon(id: id, name: id, size: 22),
+            onChanged: (id) {
+              setState(() {
+                _provider = id;
+                _page = 1;
+              });
+              _load();
+            },
+          ),
+        ),
+      const SizedBox(height: 28),
+      if (_error != null)
+        SizedBox(height: 360, child: ErrorPanel(message: _error!, onRetry: _load))
+      else if (!_loading && _videos.isEmpty)
+        const SizedBox(height: 300, child: ErrorPanel(title: 'Nothing here.', message: 'Try another search or library.', icon: Icons.video_library_outlined))
+      else
+        VideoGrid(api: widget.api, items: _videos, onPlay: widget.onPlay, loading: _loading),
+      if (_error == null && (_videos.isNotEmpty || _page > 1)) ...[
+        const SizedBox(height: 36),
+        Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+          OutlinedButton.icon(
+            onPressed: _page > 1 && !_loading
+                ? () {
+                    setState(() => _page--);
+                    _load();
+                  }
+                : null,
+            icon: const Icon(Icons.chevron_left_rounded),
+            label: const Text('Previous'),
+          ),
+          Padding(padding: const EdgeInsets.symmetric(horizontal: 18), child: Text('Page $_page', style: Vx.mono(size: 13, color: Vx.text2))),
+          OutlinedButton.icon(
+            onPressed: _videos.isNotEmpty && !_loading
+                ? () {
+                    setState(() => _page++);
+                    _load();
+                  }
+                : null,
+            icon: const Icon(Icons.chevron_right_rounded),
+            label: const Text('Next'),
+            iconAlignment: IconAlignment.end,
+          ),
+        ]),
+      ],
+    ]);
+  }
 }

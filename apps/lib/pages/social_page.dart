@@ -27,13 +27,13 @@ class _SocialPageState extends State<SocialPage> {
   Widget build(BuildContext context) {
     final channel = asMap(_social['channel']);
     final channelUrl = (channel['url'] ?? '').toString();
-    return ListView(padding: const EdgeInsets.all(28), children: [
-      const PageHeading(title: 'Social', subtitle: 'Official community, social profiles, and VexoStream bots.'),
+    return PageBody(maxWidth: 980, children: [
+      const PageHeading(kicker: 'Community', title: 'Social media', subtitle: 'Official community, social profiles, and VexoStream bots.'),
       if (_loading) const SizedBox(height: 200, child: PageLoader())
       else if (_error != null) ErrorPanel(message: _error!, onRetry: _load)
       else if (_social['enabled'] != true) const Card(child: Padding(padding: EdgeInsets.all(22), child: Text('The social page is currently hidden.')))
       else ...[
-        if (channelUrl.isNotEmpty) Card(child: ListTile(leading: const Icon(Icons.forum_rounded, color: vexoPurple), title: Text((channel['title'] ?? 'VexoStream community').toString()), subtitle: Text(channelUrl), trailing: IconButton(onPressed: () => _copy(channelUrl), icon: const Icon(Icons.copy_rounded)))),
+        if (channelUrl.isNotEmpty) Card(child: ListTile(leading: const Icon(Icons.forum_rounded, color: Vx.blue), title: Text((channel['title'] ?? 'VexoStream community').toString()), subtitle: Text(channelUrl), trailing: IconButton(onPressed: () => _copy(channelUrl), icon: const Icon(Icons.copy_rounded)))),
         const SizedBox(height: 10),
         _section('Social profiles', _linkWidgets(asMap(_social['links']))),
         const SizedBox(height: 16),
@@ -43,6 +43,6 @@ class _SocialPageState extends State<SocialPage> {
   }
 
   List<Widget> _linkWidgets(Map<String, dynamic> links) => links.entries.map((entry) => Card(child: ListTile(leading: const Icon(Icons.open_in_new_rounded), title: Text(_title(entry.key)), subtitle: Text(entry.value.toString(), maxLines: 1, overflow: TextOverflow.ellipsis), trailing: IconButton(onPressed: () => _copy(entry.value.toString()), icon: const Icon(Icons.copy_rounded))))).toList();
-  Widget _section(String title, List<Widget> children) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(title, style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800)), const SizedBox(height: 8), if (children.isEmpty) const Text('No links configured yet.', style: TextStyle(color: Colors.white54)) else ...children]);
+  Widget _section(String title, List<Widget> children) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(title, style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800)), const SizedBox(height: 8), if (children.isEmpty) const Text('No links configured yet.', style: TextStyle(color: Vx.text3)) else ...children]);
   String _title(String value) => value[0].toUpperCase() + value.substring(1);
 }

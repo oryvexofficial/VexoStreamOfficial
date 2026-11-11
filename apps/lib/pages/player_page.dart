@@ -16,23 +16,30 @@ class PlayerPage extends StatefulWidget {
 }
 
 class _PlayerPageState extends State<PlayerPage> {
-  late final Player _player;
-  late final VideoController _controller;
+  late final Player _player = Player(configuration: PlayerConfiguration(title: 'VexoStream'));
+  late final VideoController _controller = VideoController(_player);
   List<Map<String, dynamic>> _qualities = [];
-  String? _selectedQuality;
+  String? _selected;
   String? _error;
+  ApiException? _apiError;
   bool _loading = true;
-  bool _extracting = false;
+  String _title = '';
 
   String get _target => firstText(widget.video, const ['url', 'video_url', 'link', 'href']);
-  String get _title => firstText(widget.video, const ['title', 'name'], fallback: _target.isEmpty ? 'VexoStream player' : _target);
 
   @override
   void initState() {
     super.initState();
-    _player = Player();
-    _controller = VideoController(_player);
-    _loadStream();
+    _title = firstText(widget.video, const ['title', 'name']);
+    _configurePlayer();
+    _load();
+  }
+
+  Future<void> _configurePlayer() async {
+    // mpv's default user agent ("libmpv") is rejected by the Worker's bot filter.
+    try {
+      await (_player.platform as dynamic).setProperty('user-agent', VexoApi.userAgent);
+    } catch (_) {}
   }
 
   @override
@@ -41,102 +48,174 @@ class _PlayerPageState extends State<PlayerPage> {
     super.dispose();
   }
 
-  Future<void> _loadStream({Map<String, dynamic>? preferred}) async {
+  static int _height(String q) {
+    if (RegExp('4k', caseSensitive: false).hasMatch(q)) return 2160;
+    return int.tryParse(RegExp(r'\d+').firstMatch(q)?.group(0) ?? '') ?? 0;
+  }
+
+  Future<void> _load() async {
     if (_target.isEmpty) {
-      setState(() { _error = 'This video card did not include a playable source link.'; _loading = false; });
+      setState(() {
+        _error = 'This video has no playable source link.';
+        _loading = false;
+      });
       return;
     }
-    setState(() { _extracting = true; _error = null; });
+    setState(() {
+      _loading = true;
+      _error = null;
+      _apiError = null;
+    });
     try {
-      final response = asMap(await widget.api.post('/videos/extract', body: {'url': _target}, authenticated: true));
-      if (response['status'] != 'success') throw ApiException((response['error'] ?? 'The source could not be resolved.').toString());
-      final streamMap = asMap(response['streams']);
-      final qualityList = asList(streamMap['qualities']);
-      final usable = qualityList.map(asMap).where((q) => (q['x_url'] ?? '').toString().isNotEmpty).toList();
-      if (usable.isEmpty) throw const ApiException('No playable streams were returned for this video.');
-      _qualities = usable;
-      if (mounted) setState(() { _loading = false; _extracting = false; });
-      final selected = preferred ?? usable.first;
-      await _playQuality(selected);
+      final response = asMap(await widget.api.post('/videos/extract', body: {'url': _target}, authenticated: true, timeout: const Duration(seconds: 70)));
+      if (response['status'] != 'success') throw ApiException((response['error'] ?? 'This video couldn’t be resolved.').toString(), code: response['code']?.toString());
+      final apiTitle = firstText(response, const ['title']);
+      if (apiTitle.isNotEmpty) _title = apiTitle;
+      final list = asList(asMap(response['streams'])['qualities']).map(asMap).where((q) {
+        final label = (q['quality'] ?? '').toString().replaceAll(RegExp(r'[\[\]]'), '').trim();
+        return (q['x_url'] ?? '').toString().isNotEmpty && label.isNotEmpty && !RegExp(r'^(source|auto)$', caseSensitive: false).hasMatch(label);
+      }).toList()
+        ..sort((a, b) => _height((b['quality'] ?? '').toString()).compareTo(_height((a['quality'] ?? '').toString())));
+      if (list.isEmpty) throw const ApiException('No playable streams were returned for this video.');
+      _qualities = list;
+      // Start at the best quality up to 1080p, like the site's auto pick.
+      final start = list.firstWhere((q) => _height((q['quality'] ?? '').toString()) <= 1080, orElse: () => list.first);
+      await _play(start);
     } catch (e) {
-      if (mounted) setState(() { _error = e.toString(); _loading = false; _extracting = false; });
+      if (mounted) {
+        setState(() {
+          _error = e.toString();
+          _apiError = e is ApiException ? e : null;
+          _loading = false;
+        });
+      }
     }
   }
 
-  Future<void> _playQuality(Map<String, dynamic> item) async {
+  Future<void> _play(Map<String, dynamic> q) async {
+    final at = _player.state.position;
+    final resume = _selected != null && at > const Duration(seconds: 2);
     try {
-      final uri = widget.api.streamUri(item);
-      _selectedQuality = (item['quality'] ?? item['label'] ?? 'Auto').toString();
-      if (mounted) setState(() { _error = null; _loading = false; });
-      await _player.open(Media(uri.toString()), play: true);
+      final uri = widget.api.streamUri(q);
+      setState(() {
+        _selected = (q['quality'] ?? 'Auto').toString();
+        _loading = false;
+        _error = null;
+      });
+      await _player.open(Media(uri.toString(), httpHeaders: const {'User-Agent': VexoApi.userAgent}), play: true);
+      if (resume) {
+        await _player.stream.duration.firstWhere((d) => d > Duration.zero).timeout(const Duration(seconds: 15), onTimeout: () => Duration.zero);
+        await _player.seek(at);
+      }
     } catch (e) {
-      if (mounted) setState(() { _error = e.toString(); _loading = false; });
+      if (mounted) {
+        setState(() {
+          _error = e.toString();
+          _loading = false;
+        });
+      }
     }
-  }
-
-  Widget _playerSurface() {
-    if (_loading) {
-      return const Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
-        CircularProgressIndicator(),
-        SizedBox(height: 16),
-        Text('Finding a playable stream…', style: TextStyle(color: Colors.white70)),
-      ]));
-    }
-    if (_error == null) {
-      return Video(controller: _controller, fit: BoxFit.contain, controls: MaterialVideoControls);
-    }
-    return Center(child: Padding(padding: const EdgeInsets.all(24), child: Column(mainAxisSize: MainAxisSize.min, children: [
-      const Icon(Icons.error_outline, size: 38, color: Colors.orangeAccent),
-      const SizedBox(height: 12),
-      Text(_error!, textAlign: TextAlign.center),
-      if (_error!.contains('Sign in')) ...[
-        const SizedBox(height: 16),
-        FilledButton(onPressed: widget.onSignIn, child: const Text('Sign in')),
-      ],
-    ])));
   }
 
   @override
   Widget build(BuildContext context) {
+    final provider = firstText(widget.video, const ['provider']);
+    final t = Theme.of(context).textTheme;
     return Scaffold(
-      appBar: AppBar(title: Text(_title, maxLines: 1, overflow: TextOverflow.ellipsis), actions: [
-        if (_extracting) const Padding(padding: EdgeInsets.symmetric(horizontal: 18), child: Center(child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)))),
-        IconButton(tooltip: 'Retry', onPressed: _loadStream, icon: const Icon(Icons.refresh_rounded)),
-        const SizedBox(width: 8),
-      ]),
-      body: ListView(padding: const EdgeInsets.fromLTRB(24, 16, 24, 28), children: [
-        Center(child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 1200),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-            AspectRatio(
-              aspectRatio: 16 / 9,
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(20),
-                child: ColoredBox(color: Colors.black, child: _playerSurface()),
+      appBar: AppBar(
+        title: Text(_title.isEmpty ? 'Player' : _title, maxLines: 1, overflow: TextOverflow.ellipsis),
+        actions: [
+          IconButton(tooltip: 'Reload stream', onPressed: _loading ? null : _load, icon: const Icon(Icons.refresh_rounded)),
+          const SizedBox(width: 10),
+        ],
+      ),
+      body: PageBody(maxWidth: 1240, padding: const EdgeInsets.fromLTRB(28, 24, 28, 40), children: [
+        AspectRatio(
+          aspectRatio: 16 / 9,
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(Vx.radiusXl),
+            child: ColoredBox(color: Colors.black, child: _surface()),
+          ),
+        ),
+        const SizedBox(height: 22),
+        Text(_title.isEmpty ? 'Untitled video' : _title, style: t.headlineSmall?.copyWith(fontSize: 24)),
+        const SizedBox(height: 10),
+        Row(children: [
+          if (provider.isNotEmpty) ...[
+            ProviderIcon(id: provider.toLowerCase(), name: provider, size: 22),
+            const SizedBox(width: 8),
+            Text(provider[0].toUpperCase() + provider.substring(1), style: Vx.sans(size: 14, color: Vx.text2, weight: FontWeight.w500)),
+            const SizedBox(width: 14),
+          ],
+          Expanded(child: Text(_target, maxLines: 1, overflow: TextOverflow.ellipsis, style: Vx.mono(size: 12))),
+        ]),
+        if (_qualities.isNotEmpty) ...[
+          const SizedBox(height: 22),
+          Container(
+            padding: const EdgeInsets.all(18),
+            decoration: Vx.surface(),
+            child: Row(children: [
+              Text('QUALITY', style: Vx.mono(size: 12, spacing: 1.4)),
+              const SizedBox(width: 18),
+              Expanded(
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: PillTabs<String>(
+                    items: [for (final q in _qualities) ((q['quality'] ?? '').toString(), (q['quality'] ?? '').toString().replaceAll(RegExp(r'[\[\]]'), ''))],
+                    value: _selected ?? '',
+                    onChanged: (label) => _play(_qualities.firstWhere((q) => (q['quality'] ?? '').toString() == label)),
+                  ),
+                ),
               ),
-            ),
-            const SizedBox(height: 20),
-            Text(_title, style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800)),
-            const SizedBox(height: 8),
-            Text(_target, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white54)),
-            if (_qualities.isNotEmpty) ...[
-              const SizedBox(height: 22),
-              const Text('Quality', style: TextStyle(fontWeight: FontWeight.w700)),
-              const SizedBox(height: 10),
-              Wrap(spacing: 9, runSpacing: 8, children: _qualities.map((q) {
-                final label = (q['quality'] ?? q['label'] ?? 'Auto').toString();
-                return ChoiceChip(label: Text(label), selected: _selectedQuality == label, onSelected: (_) => _playQuality(q));
-              }).toList()),
-            ],
-            const SizedBox(height: 18),
-            Card(child: Padding(padding: const EdgeInsets.all(16), child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              const Icon(Icons.info_outline, color: vexoPurple),
-              const SizedBox(width: 12),
-              const Expanded(child: Text('Playback depends on the configured VexoStream Core backend and the source provider. Only publicly playable, non-DRM streams are supported.', style: TextStyle(color: Colors.white70, height: 1.4))),
-            ]))),
-          ]),
-        )),
+            ]),
+          ),
+        ],
       ]),
+    );
+  }
+
+  Widget _surface() {
+    if (_loading) {
+      return Center(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const SizedBox(width: 30, height: 30, child: CircularProgressIndicator(strokeWidth: 2.6)),
+          const SizedBox(height: 16),
+          Text('Finding the best stream…', style: Vx.sans(size: 14, color: Vx.text2)),
+        ]),
+      );
+    }
+    if (_error != null) {
+      final login = _apiError?.needsLogin == true;
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Container(
+              width: 52,
+              height: 52,
+              decoration: BoxDecoration(color: (login ? Vx.blue : Vx.red).withValues(alpha: .16), borderRadius: BorderRadius.circular(16)),
+              child: Icon(login ? Icons.lock_outline_rounded : Icons.error_outline_rounded, color: login ? Vx.blue : Vx.red),
+            ),
+            const SizedBox(height: 14),
+            Text(login ? 'Please log in first.' : 'Can’t play this video', style: Vx.sans(size: 21, weight: FontWeight.w700, color: Colors.white, spacing: -.4)),
+            const SizedBox(height: 6),
+            ConstrainedBox(constraints: const BoxConstraints(maxWidth: 440), child: Text(_error!, textAlign: TextAlign.center, style: Vx.sans(size: 14, color: Vx.text2))),
+            const SizedBox(height: 16),
+            if (login) FilledButton(onPressed: widget.onSignIn, child: const Text('Log in')) else OutlinedButton.icon(onPressed: _load, icon: const Icon(Icons.refresh_rounded, size: 18), label: const Text('Try again')),
+          ]),
+        ),
+      );
+    }
+    final theme = MaterialDesktopVideoControlsThemeData(
+      seekBarPositionColor: Vx.blue,
+      seekBarThumbColor: Vx.blue,
+      seekBarBufferColor: Color(0x55FFFFFF),
+      seekBarColor: Color(0x33FFFFFF),
+    );
+    return MaterialDesktopVideoControlsTheme(
+      normal: theme,
+      fullscreen: theme,
+      child: Video(controller: _controller, fit: BoxFit.contain, controls: MaterialDesktopVideoControls),
     );
   }
 }

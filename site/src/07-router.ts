@@ -264,7 +264,7 @@ async function handleRequest(request, env, ctx) {
         }
 
         // ---------------------------------------------------------------- maintenance gate
-        const isMedia = path === '/proxy-m3u8' || path === '/proxy-video' || path === '/proxy-image';
+        const isMedia = path === '/proxy-m3u8' || path === '/proxy-video' || path === '/proxy-image' || path === '/api/v1/image';
         const isDiag = path === '/status' || path === '/api/status' || path === '/check-host' || path.startsWith('/api/check-host/');
         if (!isMedia && !isDiag) {
             if (await isMaintenanceOn(env)) {

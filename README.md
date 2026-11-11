@@ -40,6 +40,8 @@ Base URL: `https://api.vexostream.bond/api/v1`
 | GET | `/search?q=...&provider=...&page=1` | Search alias |
 | GET | `/models?gender=women&search=...&page=1` | Performer directory |
 | GET | `/models/{slug}` | Performer profile |
+| GET | `/image?url=...` | Proxied thumbnails, posters, and performer photos |
+| GET | `/posters?u=...` | Real video posters (og:image), up to 24 per call |
 | GET | `/status` | System and provider status |
 | GET | `/social` | Public social links and bots |
 | GET | `/developers` | Embed snippet and endpoint reference |
@@ -92,13 +94,12 @@ Set Worker secrets in Cloudflare before deploying:
 
 Set the Worker `RAILWAY_URL` (or `BACKEND_URL`) to the public HTTPS origin for the VexoStream Core service. Do not put `EDGE_TOKEN` in Flutter or in the repository. If using the admin panel's backend override, that saved value takes precedence over the Worker variable.
 
-The Worker route list includes:
+The Worker serves:
 
-- `vexostream.bond/*`
-- `www.vexostream.bond/*`
-- `api.vexostream.bond/*`
+- `vexostream.bond/*` and `www.vexostream.bond/*` (zone routes)
+- `api.vexostream.bond` (custom domain, DNS created by Wrangler)
 
-Create/confirm a **proxied** DNS record for `api.vexostream.bond` in Cloudflare so the API Worker route can receive traffic. The API app's default base URL is already set to `https://api.vexostream.bond/api/v1`; use `--dart-define=VEXOSTREAM_API_BASE=...` only if you need another API origin.
+`api.vexostream.bond` is configured as a Worker **custom domain**, so `npx wrangler deploy` creates its DNS record and certificate automatically (if an old `api` DNS record already exists in Cloudflare, delete it first). Until it is live, the Windows app automatically falls back to `https://vexostream.bond/api/v1`, which the same Worker serves. The API app's default base URL is already set to `https://api.vexostream.bond/api/v1`; use `--dart-define=VEXOSTREAM_API_BASE=...` only if you need another API origin.
 
 ## Deploy site and API manually from Windows CMD
 
@@ -155,3 +156,7 @@ flutter test
 ```
 
 Use the GitHub Actions artifact for the Windows release build.
+
+## App design
+
+The Windows app uses the site's v25 dark "night-screening room" tokens (ink surfaces, signal blue `#378EFF`, pill controls, 18px rounded surfaces, hairline rings), the Geist and Geist Mono fonts, the VexoStream logo and mark, and the same layout ideas: top bar with search, sidebar with libraries, the "Paste a link. Press play." hero, video cards with real posters and hover play, pill tabs, and site-style empty/error states. The Windows build workflow sets the VexoStream icon, window title, and `VexoStream.exe` name.

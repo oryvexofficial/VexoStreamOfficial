@@ -229,6 +229,11 @@ async function handleAppApiV1(request, url, env, ctx) {
         headers.set('X-Edge-Token', EDGE_TOKEN);
         return forwardToRailway(new Request(target.toString(), { method: 'GET', headers }), ctx);
     }
+    if (path === '/image') {
+        if (!getOnly()) return appApiJson({ error: 'Method not allowed.' }, 405, { Allow: 'GET, OPTIONS' });
+        // Thumbnails and performer photos for the native app (same safety checks as /proxy-image).
+        return handleImageProxy(request, ctx);
+    }
     if (path === '/status') {
         if (!getOnly()) return appApiJson({ error: 'Method not allowed.' }, 405, { Allow: 'GET, OPTIONS' });
         const checks = await runStatusChecks(env);
@@ -256,6 +261,7 @@ async function handleAppApiV1(request, url, env, ctx) {
                 { method: 'GET', path: '/api/v1/config', auth: false },
                 { method: 'GET', path: '/api/v1/catalog?provider=xvideos&q=trending&page=1', auth: false },
                 { method: 'GET', path: '/api/v1/models', auth: 'optional by site policy' },
+                { method: 'GET', path: '/api/v1/image?url=IMAGE_URL', auth: false },
                 { method: 'POST', path: '/api/v1/videos/extract', auth: 'required by site policy' },
                 { method: 'POST', path: '/api/v1/auth/login', auth: false },
                 { method: 'POST', path: '/api/v1/auth/signup', auth: false }

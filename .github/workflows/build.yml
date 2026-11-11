@@ -27,6 +27,28 @@ jobs:
           if (!(Test-Path 'windows/CMakeLists.txt')) {
             flutter create --platforms=windows --project-name=vexostream_app --org=bond.vexostream .
           }
+      - name: Apply VexoStream branding (icon, window title, exe name)
+        working-directory: apps
+        shell: pwsh
+        run: |
+          Copy-Item 'branding/app_icon.ico' 'windows/runner/resources/app_icon.ico' -Force
+          if (Test-Path 'test/widget_test.dart') { Remove-Item 'test/widget_test.dart' -Force }
+          $main = Get-Content 'windows/runner/main.cpp' -Raw
+          $main = $main -replace 'L"vexostream_app"', 'L"VexoStream"'
+          $main = $main -replace 'Win32Window::Size size\(\d+, \d+\);', 'Win32Window::Size size(1360, 860);'
+          Set-Content 'windows/runner/main.cpp' $main -NoNewline
+          $rc = Get-Content 'windows/runner/Runner.rc' -Raw
+          $rc = $rc -replace '"CompanyName", "[^"]*"', '"CompanyName", "VexoStream"'
+          $rc = $rc -replace '"FileDescription", "[^"]*"', '"FileDescription", "VexoStream"'
+          $rc = $rc -replace '"InternalName", "[^"]*"', '"InternalName", "VexoStream"'
+          $rc = $rc -replace '"OriginalFilename", "[^"]*"', '"OriginalFilename", "VexoStream.exe"'
+          $rc = $rc -replace '"ProductName", "[^"]*"', '"ProductName", "VexoStream"'
+          $rc = $rc -replace '"LegalCopyright", "[^"]*"', '"LegalCopyright", "Copyright (C) 2026 VexoStream"'
+          Set-Content 'windows/runner/Runner.rc' $rc -NoNewline
+          $cm = Get-Content 'windows/CMakeLists.txt' -Raw
+          $cm = $cm -replace 'set\(BINARY_NAME "[^"]*"\)', 'set(BINARY_NAME "VexoStream")'
+          Set-Content 'windows/CMakeLists.txt' $cm -NoNewline
+          Select-String -Path 'windows/CMakeLists.txt' -Pattern 'BINARY_NAME "VexoStream"' | Out-Host
       - name: Resolve Flutter packages
         working-directory: apps
         run: flutter pub get
