@@ -20,6 +20,7 @@ class _HomePageState extends State<HomePage> {
   List<Map<String, dynamic>> _videos = [];
   List<Map<String, dynamic>> _providers = [];
   String _provider = '';
+  String _defaultQuery = 'trending';
   String? _error;
   String? _hint;
   bool _loading = true;
@@ -45,8 +46,9 @@ class _HomePageState extends State<HomePage> {
       final config = asMap(await widget.api.get('/config'));
       _providers = asList(config['providers']).map(asMap).toList();
       _provider = (config['defaultProvider'] ?? '').toString();
+      _defaultQuery = defaultSearchQuery(config);
       if (_provider.isNotEmpty) {
-        _videos = videoItems(await widget.api.get('/catalog', query: {'provider': _provider, 'q': 'trending', 'page': 1})).take(16).toList();
+        _videos = videoItems(await widget.api.get('/catalog', query: {'provider': _provider, 'q': _defaultQuery, 'page': 1})).take(16).toList();
       }
       if (mounted) setState(() => _loading = false);
     } catch (e) {
@@ -84,7 +86,7 @@ class _HomePageState extends State<HomePage> {
       _hero(context, live),
       const SizedBox(height: 72),
       PageHeading(
-        title: 'Trending now',
+        title: _defaultQuery.toLowerCase() == 'trending' ? 'Trending now' : '$_defaultQuery picks',
         subtitle: _provider.isEmpty ? null : 'Fresh from ${_nameOf(_provider)}.',
         large: false,
         trailing: OutlinedButton(onPressed: () => widget.onBrowse(_provider), child: const Text('See all')),

@@ -353,7 +353,7 @@ function refererFor(target) {
     return 'https://www.pornhub.com/';
 }
 
-async function forwardToRailway(request, ctx) {
+async function forwardToRailway(request, ctx, signingRequest = request) {
     const url = new URL(request.url);
     const railwayTarget = RAILWAY_URL + url.pathname + url.search;
     const cache = caches.default;
@@ -391,8 +391,8 @@ async function forwardToRailway(request, ctx) {
                 return jsonResponse({ status: 'error', error: 'Backend returned an invalid response (' + response.status + ')' }, 502);
             }
             if (data && data.status === 'success' && data.streams) {
-                // one signature per response: it only depends on IP + expiry
-                const signed = await createSignedMediaToken(clientIpOf(request));
+                // one signature per response: bind to the original client request IP + expiry
+                const signed = await createSignedMediaToken(clientIpOf(signingRequest));
                 for (const listName of ['qualities', 'fallback']) {
                     const list = Array.isArray(data.streams[listName]) ? data.streams[listName] : [];
                     for (const q of list) {
@@ -571,7 +571,7 @@ async function fetchUpstreamMedia(target, request, isPlaylist) {
     const init: RequestInit = { method: request.method === 'HEAD' ? 'HEAD' : 'GET', headers: cdnHeadersFor(target, request), redirect: 'follow' };
     for (let attempt = 0; attempt < 2; attempt++) {
         try {
-            const res = isPlaylist ? await timedFetch(target, init, 15000) : await fetch(target, init);
+            const res = await timedFetch(target, init, isPlaylist ? 15000 : 25000);
             if (attempt === 0 && (res.status >= 500 || res.status === 429)) {
                 try { if (res.body) await res.body.cancel(); } catch (_) {}
                 await new Promise(r => setTimeout(r, 300));

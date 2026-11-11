@@ -21,6 +21,7 @@ class _CatalogPageState extends State<CatalogPage> {
   List<Map<String, dynamic>> _videos = [];
   String _provider = '';
   String _q = '';
+  String _defaultQuery = 'trending';
   int _page = 1;
   bool _loading = true;
   String? _error;
@@ -44,6 +45,11 @@ class _CatalogPageState extends State<CatalogPage> {
     try {
       final config = asMap(await widget.api.get('/config'));
       _providers = asList(config['providers']).map(asMap).where((p) => p['available'] == true).toList();
+      _defaultQuery = defaultSearchQuery(config);
+      if (_q.isEmpty) {
+        _q = _defaultQuery;
+        _query.text = _q;
+      }
       if (_provider.isEmpty || !_providers.any((p) => p['id'] == _provider)) _provider = (config['defaultProvider'] ?? '').toString();
       await _load();
     } catch (e) {
@@ -69,7 +75,7 @@ class _CatalogPageState extends State<CatalogPage> {
       _error = null;
     });
     try {
-      final result = await widget.api.get('/catalog', query: {'provider': _provider, 'q': _q.isEmpty ? 'trending' : _q, 'page': _page});
+      final result = await widget.api.get('/catalog', query: {'provider': _provider, 'q': _q.isEmpty ? _defaultQuery : _q, 'page': _page});
       _videos = videoItems(result);
       if (mounted) setState(() => _loading = false);
     } catch (e) {
@@ -84,7 +90,8 @@ class _CatalogPageState extends State<CatalogPage> {
 
   void _search() {
     setState(() {
-      _q = _query.text.trim();
+      _q = _query.text.trim().isEmpty ? _defaultQuery : _query.text.trim();
+      _query.text = _q;
       _page = 1;
     });
     _load();
@@ -117,7 +124,7 @@ class _CatalogPageState extends State<CatalogPage> {
               suffixIcon: _q.isEmpty
                   ? null
                   : IconButton(
-                      tooltip: 'Clear search',
+                      tooltip: 'Restore default search',
                       onPressed: () {
                         _query.clear();
                         _search();

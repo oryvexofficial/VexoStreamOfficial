@@ -12,7 +12,8 @@ test('Worker exposes the app pages through the versioned API', () => {
     "path === '/health'", "path === '/config'", "path === '/catalog'", "path === '/search'",
     "path === '/auth/signup'", "path === '/auth/login'", "path === '/auth/logout'", "path === '/account'",
     "path === '/videos/extract'", "path === '/models'", "path === '/status'", "path === '/social'",
-    "path === '/developers'", "path === '/image'", "path === '/check-host/start'", "path === '/check-host/result'"
+    "path === '/developers'", "path === '/image'", "path === '/check-host/start'", "path === '/check-host/result'",
+    "defaultQuery: cfg.defaultQuery || 'trending'"
   ]) assert.ok(api.includes(route), `missing API contract: ${route}`);
   assert.ok(router.includes('handleAppApiV1(request, url, env, ctx)'));
   assert.ok(router.includes("'Access-Control-Allow-Headers': 'Authorization, Content-Type"));
@@ -27,12 +28,59 @@ test('API uses a zone route, not a custom domain, and sessions persist hashes on
 });
 
 const worker = (await import('../dist/worker.js')).default;
+const testAppKey = 'test-app-key-for-ci-only';
 
-test('API health endpoint answers on api.vexostream.bond with no private key in the client', async () => {
+test('API hostname serves no website at its root', async () => {
+  const response = await worker.fetch(new Request('https://api.vexostream.bond/'), {
+    STREAM_SIGN_SECRET: 'test-secret-for-ci-only', EDGE_TOKEN: 'edge-test-token', APP_KEY: testAppKey
+  }, { waitUntil() {} });
+  assert.equal(response.status, 404);
+  assert.equal(await response.text(), 'Not Found');
+});
+
+test('API hostname returns 404 for website paths', async () => {
+  const response = await worker.fetch(new Request('https://api.vexostream.bond/browse'), {
+    STREAM_SIGN_SECRET: 'test-secret-for-ci-only', EDGE_TOKEN: 'edge-test-token', APP_KEY: testAppKey
+  }, { waitUntil() {} });
+  assert.equal(response.status, 404);
+  assert.equal(await response.text(), 'Not Found');
+});
+
+test('API endpoints reject missing or wrong app keys', async () => {
+  for (const headers of [
+    { 'User-Agent': 'VexoStream-Test/1.0', Accept: 'application/json' },
+    { 'User-Agent': 'VexoStream-Test/1.0', Accept: 'application/json', 'X-App-Key': 'wrong-key' }
+  ]) {
+    const response = await worker.fetch(new Request('https://api.vexostream.bond/api/v1/health', { headers }), {
+      STREAM_SIGN_SECRET: 'test-secret-for-ci-only', EDGE_TOKEN: 'edge-test-token', APP_KEY: testAppKey
+    }, { waitUntil() {} });
+    assert.equal(response.status, 401);
+  }
+});
+
+test('fallback API host also requires APP_KEY and accepts the configured key', async () => {
+  const env = { STREAM_SIGN_SECRET: 'test-secret-for-ci-only', EDGE_TOKEN: 'edge-test-token', APP_KEY: testAppKey };
+  const missing = await worker.fetch(new Request('https://vexostream.bond/api/v1/health', {
+    headers: { 'User-Agent': 'VexoStream-Test/1.0', Accept: 'application/json', 'Accept-Language': 'en-US' }
+  }), env, { waitUntil() {} });
+  assert.equal(missing.status, 401);
+  const valid = await worker.fetch(new Request('https://vexostream.bond/api/v1/health', {
+    headers: { 'User-Agent': 'VexoStream-Test/1.0', Accept: 'application/json', 'Accept-Language': 'en-US', 'X-App-Key': testAppKey }
+  }), env, { waitUntil() {} });
+  assert.equal(valid.status, 200);
+});
+
+test('API hostname returns 404 even when app secrets are missing', async () => {
+  const response = await worker.fetch(new Request('https://api.vexostream.bond/'), {}, { waitUntil() {} });
+  assert.equal(response.status, 404);
+  assert.equal(await response.text(), 'Not Found');
+});
+
+test('API health endpoint requires the app key', async () => {
   const request = new Request('https://api.vexostream.bond/api/v1/health', {
-    headers: { 'User-Agent': 'VexoStream-Test/1.0', Accept: 'application/json' }
+    headers: { 'User-Agent': 'VexoStream-Test/1.0', Accept: 'application/json', 'X-App-Key': testAppKey }
   });
-  const response = await worker.fetch(request, { STREAM_SIGN_SECRET: 'test-secret-for-ci-only', EDGE_TOKEN: 'edge-test-token' }, { waitUntil() {} });
+  const response = await worker.fetch(request, { STREAM_SIGN_SECRET: 'test-secret-for-ci-only', EDGE_TOKEN: 'edge-test-token', APP_KEY: testAppKey }, { waitUntil() {} });
   assert.equal(response.status, 200);
   assert.equal(response.headers.get('Access-Control-Allow-Origin'), '*');
   const payload = await response.json();
@@ -43,9 +91,11 @@ test('API health endpoint answers on api.vexostream.bond with no private key in 
 test('API preflight accepts the bearer Authorization header', async () => {
   const request = new Request('https://api.vexostream.bond/api/v1/account', {
     method: 'OPTIONS',
-    headers: { Origin: 'null', 'Access-Control-Request-Method': 'GET', 'Access-Control-Request-Headers': 'authorization' }
+    headers: { Origin: 'null', 'Access-Control-Request-Method': 'GET', 'Access-Control-Request-Headers': 'authorization, x-app-key' }
   });
-  const response = await worker.fetch(request, { STREAM_SIGN_SECRET: 'test-secret-for-ci-only', EDGE_TOKEN: 'edge-test-token' }, { waitUntil() {} });
+  const response = await worker.fetch(request, { STREAM_SIGN_SECRET: 'test-secret-for-ci-only', EDGE_TOKEN: 'edge-test-token', APP_KEY: testAppKey }, { waitUntil() {} });
   assert.equal(response.status, 204);
   assert.match(response.headers.get('Access-Control-Allow-Headers') || '', /Authorization/i);
+  assert.match(response.headers.get('Access-Control-Allow-Headers') || '', /X-App-Key/i);
 });
+

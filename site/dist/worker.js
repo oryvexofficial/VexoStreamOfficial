@@ -314,7 +314,7 @@ function refererFor(target) {
   if (t.includes("youporn") || t.includes("ypncdn")) return "https://www.youporn.com/";
   return "https://www.pornhub.com/";
 }
-async function forwardToRailway(request, ctx) {
+async function forwardToRailway(request, ctx, signingRequest = request) {
   const url = new URL(request.url);
   const railwayTarget = RAILWAY_URL + url.pathname + url.search;
   const cache = caches.default;
@@ -349,7 +349,7 @@ async function forwardToRailway(request, ctx) {
         return jsonResponse({ status: "error", error: "Backend returned an invalid response (" + response2.status + ")" }, 502);
       }
       if (data && data.status === "success" && data.streams) {
-        const signed = await createSignedMediaToken(clientIpOf(request));
+        const signed = await createSignedMediaToken(clientIpOf(signingRequest));
         for (const listName of ["qualities", "fallback"]) {
           const list = Array.isArray(data.streams[listName]) ? data.streams[listName] : [];
           for (const q of list) {
@@ -511,7 +511,7 @@ async function fetchUpstreamMedia(target, request, isPlaylist) {
   const init = { method: request.method === "HEAD" ? "HEAD" : "GET", headers: cdnHeadersFor(target, request), redirect: "follow" };
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const res = isPlaylist ? await timedFetch(target, init, 15e3) : await fetch(target, init);
+      const res = await timedFetch(target, init, isPlaylist ? 15e3 : 25e3);
       if (attempt === 0 && (res.status >= 500 || res.status === 429)) {
         try {
           if (res.body) await res.body.cancel();
@@ -5058,10 +5058,17 @@ function appApiJson(data, status = 200, extra = {}) {
     "Cache-Control": "no-store",
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Authorization, Content-Type, Accept, X-Requested-With",
+    "Access-Control-Allow-Headers": "Authorization, Content-Type, Accept, X-Requested-With, X-App-Key",
     "X-Content-Type-Options": "nosniff",
     ...extra
   });
+}
+function appApiKeyStatus(request, env) {
+  const expected = String(env && env.APP_KEY || "");
+  const provided = String(request.headers.get("X-App-Key") || "");
+  if (!expected) return { ok: false, status: 503, error: "App API key is not configured." };
+  if (!provided || !timingSafeEqual(provided, expected)) return { ok: false, status: 401, error: "Unauthorized app client." };
+  return { ok: true };
 }
 async function ensureAppApiSessionsSchema(env) {
   if (__appApiSessionsReady) return true;
@@ -5126,6 +5133,7 @@ function appApiBackendRequest(request, url, path, params = null) {
   }
   const headers = new Headers(request.headers);
   headers.delete("Authorization");
+  headers.delete("X-App-Key");
   headers.set("X-Edge-Token", EDGE_TOKEN);
   headers.set("Accept", "application/json");
   return new Request(target.toString(), { method: "GET", headers });
@@ -5152,6 +5160,7 @@ async function handleAppApiV1(request, url, env, ctx) {
       apiVersion: 1,
       providers,
       defaultProvider: defaultProviderOf(cfg),
+      defaultQuery: cfg.defaultQuery || "trending",
       access: { requireLogin: members.requireLogin, allowSignup: members.allowSignup, modelsLogin: members.modelsLogin }
     });
   }
@@ -5207,7 +5216,7 @@ async function handleAppApiV1(request, url, env, ctx) {
     if (!provider) return lockedJson(cfg, provider);
     if (isProviderHidden(cfg, provider)) return hiddenJson(provider);
     if (isProviderLocked(cfg, provider)) return lockedJson(cfg, provider);
-    const q = String(url.searchParams.get("q") || url.searchParams.get("search") || "trending").trim().slice(0, 100) || "trending";
+    const q = String(url.searchParams.get("q") || url.searchParams.get("search") || cfg.defaultQuery || "trending").trim().slice(0, 100) || cfg.defaultQuery || "trending";
     const params = { q, provider, page: appApiPageNumber(url.searchParams.get("page")) };
     return forwardToRailway(appApiBackendRequest(request, url, "/api/explore", params), ctx);
   }
@@ -5253,7 +5262,7 @@ async function handleAppApiV1(request, url, env, ctx) {
     if (isProviderLocked(cfg, provider)) return lockedJson(cfg, provider);
     const members = await getMembersConfig(env);
     if (members.requireLogin && !await appApiMember(request, env)) return appApiJson({ error: "Sign in before playing videos.", code: "auth_required" }, 401);
-    return forwardToRailway(appApiBackendRequest(request, url, "/api/extract", { url: target }), ctx);
+    return forwardToRailway(appApiBackendRequest(request, url, "/api/extract", { url: target }), ctx, request);
   }
   if (path === "/posters") {
     if (!getOnly()) return appApiJson({ error: "Method not allowed." }, 405, { Allow: "GET, OPTIONS" });
@@ -6621,11 +6630,25 @@ async function socialPreview(targetUrl) {
 }
 async function handleRequest(request, env, ctx) {
   initConfig(env);
-  if (!STREAM_SIGN_SECRET || !EDGE_TOKEN) return new Response("Service secrets must be configured before use.", { status: 503, headers: { "Cache-Control": "no-store" } });
-  await getBackendUrl(env);
   try {
     const url = new URL(request.url);
     const path = url.pathname;
+    const isApiHost = url.hostname.toLowerCase() === "api.vexostream.bond";
+    const isAppApiPath = path === APP_API_PREFIX || path.startsWith(APP_API_PREFIX + "/");
+    const isApiProxyPath = path === "/proxy-m3u8" || path === "/proxy-video" || path === "/proxy-image";
+    if (isApiHost && !isAppApiPath && !isApiProxyPath) {
+      return new Response("Not Found", {
+        status: 404,
+        headers: {
+          "Content-Type": "text/plain;charset=UTF-8",
+          "Cache-Control": "no-store",
+          "X-Robots-Tag": "noindex, nofollow",
+          "X-Content-Type-Options": "nosniff"
+        }
+      });
+    }
+    if (!STREAM_SIGN_SECRET || !EDGE_TOKEN) return new Response("Service secrets must be configured before use.", { status: 503, headers: { "Cache-Control": "no-store" } });
+    await getBackendUrl(env);
     if (url.hostname.startsWith("www.") && url.hostname.slice(4) === seoHost() && (request.method === "GET" || request.method === "HEAD") && path !== "/webhook") {
       return new Response(null, { status: 301, headers: { "Location": SEO_ORIGIN + path + url.search, "Cache-Control": "public, max-age=86400" } });
     }
@@ -6654,10 +6677,14 @@ async function handleRequest(request, env, ctx) {
         headers: {
           "Access-Control-Allow-Origin": "*",
           "Access-Control-Allow-Methods": "GET, POST, OPTIONS, HEAD",
-          "Access-Control-Allow-Headers": "Authorization, Content-Type, X-Edge-Token, Accept, Origin, Range, X-Requested-With",
+          "Access-Control-Allow-Headers": "Authorization, Content-Type, X-Edge-Token, X-App-Key, Accept, Origin, Range, X-Requested-With",
           "Access-Control-Max-Age": "86400"
         }
       });
+    }
+    if (isAppApiPath) {
+      const appKey = appApiKeyStatus(request, env);
+      if (!appKey.ok) return appApiJson({ status: "error", error: appKey.error }, appKey.status);
     }
     const gate = await antiScrapeGate(request, url, env, ctx);
     if (gate) return gate;
@@ -6852,7 +6879,7 @@ async function handleRequest(request, env, ctx) {
     if (!isMedia && !isDiag) {
       if (await isMaintenanceOn(env)) {
         if (!await verifyAdminSession(request, env)) {
-          if (path.startsWith("/api/")) return jsonResponse({ status: "error", error: "Maintenance in progress" }, 503, { "Retry-After": "3600" });
+          if (path.startsWith("/api/")) return appApiJson({ status: "error", error: "VexoStream is under maintenance. Try again soon.", code: "maintenance" }, 503, { "Retry-After": "3600" });
           return htmlResponse(renderMaintenanceHtml(), 503, { ...SECURE_HTML_HEADERS, "Retry-After": "3600", "Cache-Control": "no-store" });
         }
       }

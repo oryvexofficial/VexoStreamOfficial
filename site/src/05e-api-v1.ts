@@ -12,10 +12,18 @@ function appApiJson(data, status = 200, extra = {}) {
         'Cache-Control': 'no-store',
         'Access-Control-Allow-Origin': '*',
         'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-        'Access-Control-Allow-Headers': 'Authorization, Content-Type, Accept, X-Requested-With',
+        'Access-Control-Allow-Headers': 'Authorization, Content-Type, Accept, X-Requested-With, X-App-Key',
         'X-Content-Type-Options': 'nosniff',
         ...extra
     });
+}
+
+function appApiKeyStatus(request, env) {
+    const expected = String(env && env.APP_KEY || '');
+    const provided = String(request.headers.get('X-App-Key') || '');
+    if (!expected) return { ok: false, status: 503, error: 'App API key is not configured.' };
+    if (!provided || !timingSafeEqual(provided, expected)) return { ok: false, status: 401, error: 'Unauthorized app client.' };
+    return { ok: true };
 }
 
 async function ensureAppApiSessionsSchema(env) {
@@ -89,6 +97,7 @@ function appApiBackendRequest(request, url, path, params = null) {
     }
     const headers = new Headers(request.headers);
     headers.delete('Authorization');
+    headers.delete('X-App-Key');
     headers.set('X-Edge-Token', EDGE_TOKEN);
     headers.set('Accept', 'application/json');
     return new Request(target.toString(), { method: 'GET', headers });
@@ -117,6 +126,7 @@ async function handleAppApiV1(request, url, env, ctx) {
             apiVersion: 1,
             providers,
             defaultProvider: defaultProviderOf(cfg),
+            defaultQuery: cfg.defaultQuery || 'trending',
             access: { requireLogin: members.requireLogin, allowSignup: members.allowSignup, modelsLogin: members.modelsLogin }
         });
     }
@@ -172,7 +182,7 @@ async function handleAppApiV1(request, url, env, ctx) {
         if (!provider) return lockedJson(cfg, provider);
         if (isProviderHidden(cfg, provider)) return hiddenJson(provider);
         if (isProviderLocked(cfg, provider)) return lockedJson(cfg, provider);
-        const q = String(url.searchParams.get('q') || url.searchParams.get('search') || 'trending').trim().slice(0, 100) || 'trending';
+        const q = String(url.searchParams.get('q') || url.searchParams.get('search') || cfg.defaultQuery || 'trending').trim().slice(0, 100) || cfg.defaultQuery || 'trending';
         const params = { q, provider, page: appApiPageNumber(url.searchParams.get('page')) };
         return forwardToRailway(appApiBackendRequest(request, url, '/api/explore', params), ctx);
     }
@@ -211,7 +221,7 @@ async function handleAppApiV1(request, url, env, ctx) {
         if (isProviderLocked(cfg, provider)) return lockedJson(cfg, provider);
         const members = await getMembersConfig(env);
         if (members.requireLogin && !(await appApiMember(request, env))) return appApiJson({ error: 'Sign in before playing videos.', code: 'auth_required' }, 401);
-        return forwardToRailway(appApiBackendRequest(request, url, '/api/extract', { url: target }), ctx);
+        return forwardToRailway(appApiBackendRequest(request, url, '/api/extract', { url: target }), ctx, request);
     }
     if (path === '/posters') {
         if (!getOnly()) return appApiJson({ error: 'Method not allowed.' }, 405, { Allow: 'GET, OPTIONS' });

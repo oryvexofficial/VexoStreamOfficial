@@ -1,6 +1,8 @@
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 import 'package:vexostream_app/api/vexo_api.dart';
 
 void main() {
@@ -11,13 +13,23 @@ void main() {
     expect(asList(null), isEmpty);
   });
 
-  test('catalogue filter keeps only playable cards with real thumbnails', () {
+  test('app uses the admin-saved default search and has a safe fallback', () {
+    expect(defaultSearchQuery({'defaultQuery': 'Brazzers'}), 'Brazzers');
+    expect(defaultSearchQuery({'defaultQuery': '  '}), 'trending');
+    expect(defaultSearchQuery(null), 'trending');
+  });
+
+  test('catalogue normalizes thumbnail aliases and allows poster enrichment', () {
     final items = videoItems([
-      {'url': 'https://www.xvideos.com/video1', 'thumbnail': 'https://img.example.test/a.jpg'},
-      {'url': 'https://www.xvideos.com/video2', 'thumbnail': 'https://img.example.test/blank.gif'},
+      {'url': 'https://www.xvideos.com/video1', 'thumbnail_url': 'https://img.example.test/a.jpg'},
+      {'url': 'https://www.xvideos.com/video2', 'images': [{'url': 'https://img.example.test/b.jpg'}]},
+      {'url': 'https://www.xvideos.com/video3'},
+      {'url': 'https://www.xvideos.com/video4', 'thumbnail': 'https://img.example.test/blank.gif'},
       {'url': '', 'thumbnail': 'https://img.example.test/c.jpg'},
     ]);
-    expect(items.length, 1);
+    expect(items.length, 3);
+    expect(videoThumbnail(items[0]), 'https://img.example.test/a.jpg');
+    expect(items[1]['thumbnail'], 'https://img.example.test/b.jpg');
   });
 
   test('durations render like the site', () {
@@ -36,9 +48,23 @@ void main() {
     expect(uri.queryParameters['sig'], 'signed');
   });
 
-  test('images go through the Worker image proxy', () {
-    final url = Uri.parse(VexoApi().imageUrl('//img.example.test/a.jpg'));
+  test('images go through the Worker image proxy and attach APP_KEY', () {
+    final api = VexoApi();
+    final url = Uri.parse(api.imageUrl('//img.example.test/a.jpg'));
     expect(url.path, '/api/v1/image');
     expect(url.queryParameters['url'], 'https://img.example.test/a.jpg');
+    expect(api.imageHeaders['X-App-Key'], VexoApi.appKey);
+    expect(api.mediaHeaders.containsKey('X-App-Key'), isFalse);
+    api.close();
+  });
+
+  test('API requests attach APP_KEY', () async {
+    final client = MockClient((request) async {
+      expect(request.headers['x-app-key'], VexoApi.appKey);
+      return http.Response('{"ok":true}', 200);
+    });
+    final api = VexoApi(client: client);
+    await api.get('/health');
+    api.close();
   });
 }

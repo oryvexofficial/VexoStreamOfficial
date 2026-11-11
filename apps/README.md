@@ -4,4 +4,8 @@ This is the Flutter source for the VexoStream Windows app. The repository's GitH
 
 Default API: `https://api.vexostream.bond/api/v1`. Override at build time with `--dart-define=VEXOSTREAM_API_BASE=https://your-api.example/api/v1`.
 
+Build with the same shared key configured as the Worker `APP_KEY` secret: `flutter build windows --release --dart-define=APP_KEY=<same-value>`. The app sends it as `X-App-Key` on app API and image requests. Media playback uses separate short-lived signed URLs so HLS segment requests work with native players. GitHub Actions reads it from the repository secret named `APP_KEY`; without it, the release artifact is skipped. The key is embedded in the desktop binary, so it can be extracted and should not be treated as a confidential secret.
+
+The app reads the admin-saved Default search value for its Home feed and the initial Browse/Search screen. A manually entered search overrides it; clearing the field restores the admin default.
+
 The app is 18+ and uses the site's Worker API for accounts, catalog, performer profiles, status, social information, authorized Check host checks, and stream extraction. Secure account tokens are stored with Windows secure storage. The native player uses the Worker-signed media proxy URLs.

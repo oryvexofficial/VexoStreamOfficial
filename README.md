@@ -89,8 +89,11 @@ Set Worker secrets in Cloudflare before deploying:
 
 - `STREAM_SIGN_SECRET`: a long, random secret used for signed sessions and media URLs.
 - `EDGE_TOKEN`: a separate long, random token shared with the configured VexoStream Core backend.
+- `APP_KEY`: a random app-access key. The Worker requires it in `X-App-Key` for every `/api/v1` request. Stream proxy URLs use their own short-lived signatures.
 - `TELEGRAM_BOT_TOKEN`: optional, only if the Telegram bot is enabled.
 - `ADMIN_USERS`: optional legacy bootstrap admins, if used.
+
+Use the same `APP_KEY` value as a GitHub Actions repository secret named `APP_KEY`, so the Windows release build embeds it. From `site/`, run `npx wrangler secret put APP_KEY` and paste the value when prompted. For local builds, pass `--dart-define=APP_KEY=<same-value>`. Don’t commit the key. It is embedded in the desktop app and can be extracted from the binary, so treat it as an app identifier/access gate, not a durable secret; keep member auth and server-side limits for real protection. If the key is missing from GitHub Actions, tests still run but the release artifact is skipped.
 
 Set the Worker `RAILWAY_URL` (or `BACKEND_URL`) to the public HTTPS origin for the VexoStream Core service. Do not put `EDGE_TOKEN` in Flutter or in the repository. If using the admin panel's backend override, that saved value takes precedence over the Worker variable.
 
@@ -100,7 +103,7 @@ The Worker serves these Cloudflare zone routes:
 - `www.vexostream.bond/*`
 - `api.vexostream.bond/*` for the API and media proxy
 
-The API uses a Worker **Route**, not a Custom Domain. Keep an existing proxied DNS record for `api` in the `vexostream.bond` zone; unlike a Custom Domain, a Route does not create DNS records or issue a separate certificate. The Windows app tries `https://api.vexostream.bond/api/v1` first and falls back to `https://vexostream.bond/api/v1`, which the same Worker also serves. Use `--dart-define=VEXOSTREAM_API_BASE=...` only if you need another API origin.
+The API uses a Worker **Route**, not a Custom Domain. Keep an existing proxied DNS record for `api` in the `vexostream.bond` zone; unlike a Custom Domain, a Route does not create DNS records or issue a separate certificate. `https://api.vexostream.bond/` and non-API website paths return plain 404s. `/api/v1` and image requests require `X-App-Key`; media proxy URLs use short-lived IP-bound signatures to support HLS subrequests. The Windows app tries `https://api.vexostream.bond/api/v1` first and falls back to `https://vexostream.bond/api/v1`, which the same Worker also serves. Use `--dart-define=VEXOSTREAM_API_BASE=...` only if you need another API origin.
 
 ## Deploy site and API manually from Windows CMD
 
@@ -140,7 +143,7 @@ npx wrangler deploy
 
 Wrangler does not run the source build automatically. `npx wrangler deploy` works from the supplied ZIP because the tested `dist/worker.js` is included; `npm run build` regenerates it after source edits. Normal GitHub pushes run Flutter tests and generate the Windows release artifact only. They do not build or deploy the site.
 
-`site/wrangler.toml` carries forward the zone and D1 IDs from the supplied archive. Confirm they belong to your Cloudflare account and replace them if you created different databases. Ensure `api.vexostream.bond` has a proxied DNS record in that zone for the Worker Route. Set `STREAM_SIGN_SECRET` and `EDGE_TOKEN` as Worker secrets, and configure `RAILWAY_URL`/`BACKEND_URL` to the separate VexoStream Core service. Authenticate with Wrangler locally, or use a Cloudflare API token in your terminal environment. Don’t commit credentials.
+`site/wrangler.toml` carries forward the zone and D1 IDs from the supplied archive. Confirm they belong to your Cloudflare account and replace them if you created different databases. Ensure `api.vexostream.bond` has a proxied DNS record in that zone for the Worker Route. Set `STREAM_SIGN_SECRET`, `EDGE_TOKEN`, and `APP_KEY` as Worker secrets, and configure `RAILWAY_URL`/`BACKEND_URL` to the separate VexoStream Core service. Authenticate with Wrangler locally, or use a Cloudflare API token in your terminal environment. Don’t commit credentials.
 
 ## Local source checks
 

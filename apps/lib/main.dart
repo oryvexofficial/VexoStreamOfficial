@@ -145,6 +145,41 @@ class _AgeBlockedPage extends StatelessWidget {
       );
 }
 
+class _AppMaintenancePage extends StatefulWidget {
+  const _AppMaintenancePage({required this.api});
+  final VexoApi api;
+  @override
+  State<_AppMaintenancePage> createState() => _AppMaintenancePageState();
+}
+
+class _AppMaintenancePageState extends State<_AppMaintenancePage> {
+  bool _checking = false;
+  Future<void> _checkAgain() async {
+    setState(() => _checking = true);
+    try { await widget.api.get('/health'); } catch (_) {}
+    if (mounted) setState(() => _checking = false);
+  }
+
+  @override
+  Widget build(BuildContext context) => Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 520),
+          child: Padding(
+            padding: const EdgeInsets.all(28),
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              const Icon(Icons.build_circle_outlined, size: 52, color: Vx.amber),
+              const SizedBox(height: 20),
+              Text('We’ll be right back.', style: Theme.of(context).textTheme.headlineSmall, textAlign: TextAlign.center),
+              const SizedBox(height: 10),
+              Text('VexoStream is getting a quick tune-up. Try again in a few minutes.', style: Vx.sans(size: 15, color: Vx.text2), textAlign: TextAlign.center),
+              const SizedBox(height: 20),
+              OutlinedButton.icon(onPressed: _checking ? null : _checkAgain, icon: const Icon(Icons.refresh_rounded), label: Text(_checking ? 'Checking…' : 'Check again')),
+            ]),
+          ),
+        ),
+      );
+}
+
 enum _Page { home, browse, models, social, developers, status, checkHost, account }
 
 class VexoShell extends StatefulWidget {
@@ -273,11 +308,16 @@ class _VexoShellState extends State<VexoShell> {
               child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
                 _sidebar(wide),
                 Expanded(
-                  child: AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 260),
-                    switchInCurve: Vx.ease,
-                    transitionBuilder: (child, a) => FadeTransition(opacity: a, child: ScaleTransition(scale: Tween(begin: .985, end: 1.0).animate(a), child: child)),
-                    child: KeyedSubtree(key: ValueKey('${_page.name}-$_browseKey-$_accountKey'), child: _body()),
+                  child: ValueListenableBuilder<bool>(
+                    valueListenable: widget.api.maintenanceMode,
+                    builder: (context, maintenance, _) => maintenance
+                        ? _AppMaintenancePage(api: widget.api)
+                        : AnimatedSwitcher(
+                            duration: const Duration(milliseconds: 260),
+                            switchInCurve: Vx.ease,
+                            transitionBuilder: (child, a) => FadeTransition(opacity: a, child: ScaleTransition(scale: Tween(begin: .985, end: 1.0).animate(a), child: child)),
+                            child: KeyedSubtree(key: ValueKey('${_page.name}-$_browseKey-$_accountKey'), child: _body()),
+                          ),
                   ),
                 ),
               ]),

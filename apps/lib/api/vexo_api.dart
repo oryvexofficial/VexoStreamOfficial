@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 
@@ -26,6 +27,7 @@ class VexoApi {
   VexoApi({http.Client? client}) : _client = client ?? http.Client();
 
   static const _override = String.fromEnvironment('VEXOSTREAM_API_BASE');
+  static const appKey = String.fromEnvironment('APP_KEY');
   static const primaryBase = 'https://api.vexostream.bond/api/v1';
   static const fallbackBase = 'https://vexostream.bond/api/v1';
   static const userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) VexoStream-Windows/1.1';
@@ -35,6 +37,7 @@ class VexoApi {
   static List<String> get _bases => _override.isNotEmpty ? [_override] : const [primaryBase, fallbackBase];
 
   final http.Client _client;
+  final ValueNotifier<bool> maintenanceMode = ValueNotifier(false);
   String? _token;
   int _baseIndex = 0;
 
@@ -92,6 +95,7 @@ class VexoApi {
       'Accept': 'application/json',
       'User-Agent': userAgent,
       'Accept-Language': 'en-US,en;q=0.9',
+      'X-App-Key': appKey,
     };
     if (json) headers['Content-Type'] = 'application/json';
     final token = _token;
@@ -136,14 +140,25 @@ class VexoApi {
 
   dynamic _decode(http.Response response) {
     dynamic data;
+    var rawBody = '';
     try {
-      data = jsonDecode(utf8.decode(response.bodyBytes));
+      rawBody = utf8.decode(response.bodyBytes).trim();
+      data = jsonDecode(rawBody);
     } catch (_) {
       data = <String, dynamic>{};
+    }
+    if (response.statusCode >= 200 && response.statusCode < 300) {
+      if (maintenanceMode.value) maintenanceMode.value = false;
+      return data;
     }
     if (response.statusCode < 200 || response.statusCode >= 300) {
       final map = data is Map ? data : const <String, dynamic>{};
       var message = (map['error'] ?? map['message'] ?? '').toString();
+      final code = (map['code'] ?? '').toString();
+      maintenanceMode.value = response.statusCode == 503 && (code == 'maintenance' || message.toLowerCase().contains('maintenance'));
+      if (message.isEmpty && rawBody.isNotEmpty && !rawBody.toLowerCase().contains('<html')) {
+        message = rawBody.replaceAll(RegExp(r'\s+'), ' ').substring(0, rawBody.length > 240 ? 240 : rawBody.length);
+      }
       if (message.isEmpty) {
         message = switch (response.statusCode) {
           401 => 'Please log in first.',
@@ -152,7 +167,7 @@ class VexoApi {
           423 => 'This library is currently unavailable.',
           429 => 'Too many requests. Wait a moment and try again.',
           503 => 'VexoStream is under maintenance. Try again soon.',
-          _ => 'The server answered ${response.statusCode}.',
+          _ => response.statusCode == 400 ? 'The upstream service rejected this request (400). Check the VexoStream Core endpoint and logs.' : 'The server answered ${response.statusCode}.',
         };
       }
       throw ApiException(message, statusCode: response.statusCode, code: map['code']?.toString());
@@ -169,7 +184,8 @@ class VexoApi {
     return _origin.replace(path: '/api/v1/image', queryParameters: {'url': value}).toString();
   }
 
-  Map<String, String> get imageHeaders => const {'User-Agent': userAgent, 'Accept': 'image/avif,image/webp,image/*,*/*;q=0.8'};
+  Map<String, String> get imageHeaders => {'User-Agent': userAgent, 'Accept': 'image/avif,image/webp,image/*,*/*;q=0.8', 'X-App-Key': appKey};
+  Map<String, String> get mediaHeaders => {'User-Agent': userAgent};
 
   /// Real posters (og:image of each video page), like the site cards use.
   Future<Map<String, String>> posters(List<String> pageUrls) async {
@@ -207,7 +223,10 @@ class VexoApi {
     }
   }
 
-  void close() => _client.close();
+  void close() {
+    _client.close();
+    maintenanceMode.dispose();
+  }
 }
 
 Map<String, dynamic> asMap(dynamic value) => value is Map<String, dynamic>
@@ -218,6 +237,11 @@ Map<String, dynamic> asMap(dynamic value) => value is Map<String, dynamic>
 
 List<dynamic> asList(dynamic value) => value is List ? value : <dynamic>[];
 
+String defaultSearchQuery(dynamic config) {
+  final value = firstText(asMap(config), const ['defaultQuery']).trim();
+  return value.isEmpty ? 'trending' : value;
+}
+
 String firstText(Map<String, dynamic> map, List<String> keys, {String fallback = ''}) {
   for (final key in keys) {
     final value = map[key];
@@ -226,13 +250,36 @@ String firstText(Map<String, dynamic> map, List<String> keys, {String fallback =
   return fallback;
 }
 
+/// Thumbnail aliases returned by the different catalogue backends.
+String videoThumbnail(Map<String, dynamic> item) {
+  final direct = firstText(item, const [
+    'thumbnail', 'thumbnail_url', 'thumb', 'thumb_url', 'poster', 'poster_url',
+    'image', 'image_url', 'preview', 'preview_url', 'cover', 'cover_url'
+  ]);
+  if (direct.isNotEmpty) return direct;
+  for (final key in const ['images', 'photos', 'thumbnails']) {
+    final values = asList(item[key]);
+    if (values.isEmpty) continue;
+    final first = values.first;
+    final url = first is Map ? firstText(asMap(first), const ['url', 'image_url', 'src']) : first.toString().trim();
+    if (url.isNotEmpty) return url;
+  }
+  return '';
+}
+
 /// Catalogue responses are either a bare list or wrapped in a map.
 List<Map<String, dynamic>> videoItems(dynamic value) {
-  final raw = value is List ? value : asList(asMap(value)['videos'] ?? asMap(value)['results'] ?? asMap(value)['items'] ?? asMap(value)['data']);
+  final map = asMap(value);
+  final raw = value is List ? value : asList(map['videos'] ?? map['results'] ?? map['items'] ?? map['data']);
   return raw.map(asMap).where((it) {
-    final url = firstText(it, const ['url', 'video_url', 'link']);
-    final thumb = firstText(it, const ['thumbnail', 'thumb', 'poster', 'image']);
-    return url.isNotEmpty && thumb.length >= 8 && !thumb.contains('blank.gif');
+    final url = firstText(it, const ['url', 'video_url', 'link', 'href']);
+    final thumb = videoThumbnail(it).toLowerCase();
+    return url.isNotEmpty && !thumb.contains('blank.gif');
+  }).map((it) {
+    final normalized = Map<String, dynamic>.from(it);
+    final thumb = videoThumbnail(it);
+    if (thumb.isNotEmpty) normalized['thumbnail'] = thumb;
+    return normalized;
   }).toList();
 }
 

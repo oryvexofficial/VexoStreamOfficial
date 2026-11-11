@@ -23,7 +23,7 @@ class _VideoCardState extends State<VideoCard> {
   Widget build(BuildContext context) {
     final video = widget.video;
     final title = firstText(video, const ['title', 'name', 'video_title'], fallback: 'Untitled video');
-    final listing = firstText(video, const ['thumbnail', 'thumb', 'poster', 'image', 'image_url']);
+    final listing = videoThumbnail(video);
     final image = (widget.poster ?? '').isNotEmpty ? widget.poster! : listing;
     final duration = formatDuration(video['duration'] ?? video['length']);
     final provider = firstText(video, const ['provider', 'source']);
@@ -213,8 +213,18 @@ class _VideoGridState extends State<VideoGrid> {
           itemBuilder: (context, i) {
             if (widget.loading) return const VideoCardSkeleton();
             final item = widget.items[i];
-            final url = firstText(item, const ['url', 'video_url', 'link']);
-            return VideoCard(api: widget.api, video: item, poster: _posters[url], onTap: () => widget.onPlay(item));
+            final url = firstText(item, const ['url', 'video_url', 'link', 'href']);
+            final poster = _posters[url];
+            return VideoCard(
+              api: widget.api,
+              video: item,
+              poster: poster,
+              onTap: () {
+                final playable = Map<String, dynamic>.from(item);
+                if ((poster ?? '').isNotEmpty) playable['thumbnail'] = poster;
+                widget.onPlay(playable);
+              },
+            );
           },
         );
       });

@@ -42,7 +42,7 @@ class _ModelsPageState extends State<ModelsPage> {
     });
     try {
       final result = asMap(await widget.api.get('/models', query: {'gender': _gender, 'search': _search.text.trim(), 'page': _page}, authenticated: true));
-      _models = asList(result['models'] ?? result['results'] ?? result['items']).map(asMap).toList();
+      _models = asList(result['models'] ?? result['results'] ?? result['items'] ?? result['data']).map(asMap).toList();
       _hasMore = result['has_more'] == true || result['hasMore'] == true;
       if (mounted) setState(() => _loading = false);
     } catch (e) {
@@ -159,7 +159,7 @@ class _ModelCardState extends State<_ModelCard> {
   Widget build(BuildContext context) {
     final m = widget.model;
     final name = firstText(m, const ['name', 'title'], fallback: 'Profile');
-    final image = widget.api.imageUrl(firstText(m, const ['image_url', 'image', 'thumbnail', 'photo']));
+    final image = widget.api.imageUrl(firstText(m, const ['image_url', 'image', 'thumbnail_url', 'thumbnail', 'photo', 'avatar', 'picture']));
     final country = firstText(m, const ['country_name', 'country']);
     return MouseRegion(
       cursor: SystemMouseCursors.click,
@@ -253,7 +253,7 @@ class _ModelProfilePageState extends State<ModelProfilePage> {
         .map((e) => e is Map ? (e['url'] ?? e['image_url'] ?? '').toString() : e.toString())
         .where((e) => e.startsWith('http') || e.startsWith('//'))
         .toList();
-    final main = firstText(_model, const ['image_url', 'image', 'thumbnail', 'photo']);
+    final main = firstText(_model, const ['image_url', 'image', 'thumbnail_url', 'thumbnail', 'photo', 'avatar', 'picture']);
     if (main.isNotEmpty && !list.contains(main)) list.insert(0, main);
     return list;
   }
@@ -262,7 +262,7 @@ class _ModelProfilePageState extends State<ModelProfilePage> {
   Widget build(BuildContext context) {
     final name = firstText(_model, const ['name', 'title'], fallback: 'Model profile');
     final summary = firstText(_model, const ['description', 'bio', 'about']);
-    const hidden = {'image_url', 'image', 'thumbnail', 'photo', 'gallery', 'images', 'photos', 'description', 'bio', 'about', 'slug', 'id', 'name', 'title', 'url', 'country_flag'};
+    const hidden = {'image_url', 'image', 'thumbnail_url', 'thumbnail', 'photo', 'avatar', 'picture', 'gallery', 'images', 'photos', 'description', 'bio', 'about', 'slug', 'id', 'name', 'title', 'url', 'country_flag'};
     final details = _model.entries.where((e) => !hidden.contains(e.key) && e.value != null && e.value is! Map && e.value is! List && e.value.toString().trim().isNotEmpty).toList();
     final photos = _photos;
     final current = photos.isEmpty ? '' : widget.api.imageUrl(photos[_photo.clamp(0, photos.length - 1)]);

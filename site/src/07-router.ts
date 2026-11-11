@@ -39,11 +39,28 @@ async function socialPreview(targetUrl) {
 
 async function handleRequest(request, env, ctx) {
     initConfig(env);
-    if (!STREAM_SIGN_SECRET || !EDGE_TOKEN) return new Response('Service secrets must be configured before use.', { status: 503, headers: { 'Cache-Control': 'no-store' } });
-    await getBackendUrl(env);
     try {
         const url = new URL(request.url);
         const path = url.pathname;
+        const isApiHost = url.hostname.toLowerCase() === 'api.vexostream.bond';
+        const isAppApiPath = path === APP_API_PREFIX || path.startsWith(APP_API_PREFIX + '/');
+        const isApiProxyPath = path === '/proxy-m3u8' || path === '/proxy-video' || path === '/proxy-image';
+
+        // Keep the API hostname API-only: never render the public website there.
+        if (isApiHost && !isAppApiPath && !isApiProxyPath) {
+            return new Response('Not Found', {
+                status: 404,
+                headers: {
+                    'Content-Type': 'text/plain;charset=UTF-8',
+                    'Cache-Control': 'no-store',
+                    'X-Robots-Tag': 'noindex, nofollow',
+                    'X-Content-Type-Options': 'nosniff'
+                }
+            });
+        }
+
+        if (!STREAM_SIGN_SECRET || !EDGE_TOKEN) return new Response('Service secrets must be configured before use.', { status: 503, headers: { 'Cache-Control': 'no-store' } });
+        await getBackendUrl(env);
 
         // One canonical host: www.vexostream.bond -> vexostream.bond (301)
         if (url.hostname.startsWith('www.') && url.hostname.slice(4) === seoHost() && (request.method === 'GET' || request.method === 'HEAD') && path !== '/webhook') {
@@ -76,10 +93,17 @@ async function handleRequest(request, env, ctx) {
                 headers: {
                     'Access-Control-Allow-Origin': '*',
                     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS, HEAD',
-                    'Access-Control-Allow-Headers': 'Authorization, Content-Type, X-Edge-Token, Accept, Origin, Range, X-Requested-With',
+                    'Access-Control-Allow-Headers': 'Authorization, Content-Type, X-Edge-Token, X-App-Key, Accept, Origin, Range, X-Requested-With',
                     'Access-Control-Max-Age': '86400'
                 }
             });
+        }
+
+        // Gate the versioned API. Media URLs use short-lived, IP-bound signatures;
+        // HLS players do not reliably forward custom headers to playlist segments.
+        if (isAppApiPath) {
+            const appKey = appApiKeyStatus(request, env);
+            if (!appKey.ok) return appApiJson({ status: 'error', error: appKey.error }, appKey.status);
         }
 
         const gate = await antiScrapeGate(request, url, env, ctx);
@@ -269,7 +293,7 @@ async function handleRequest(request, env, ctx) {
         if (!isMedia && !isDiag) {
             if (await isMaintenanceOn(env)) {
                 if (!(await verifyAdminSession(request, env))) {
-                    if (path.startsWith('/api/')) return jsonResponse({ status: 'error', error: 'Maintenance in progress' }, 503, { 'Retry-After': '3600' });
+                    if (path.startsWith('/api/')) return appApiJson({ status: 'error', error: 'VexoStream is under maintenance. Try again soon.', code: 'maintenance' }, 503, { 'Retry-After': '3600' });
                     return htmlResponse(renderMaintenanceHtml(), 503, { ...SECURE_HTML_HEADERS, 'Retry-After': '3600', 'Cache-Control': 'no-store' });
                 }
             }
