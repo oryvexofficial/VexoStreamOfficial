@@ -94,12 +94,13 @@ Set Worker secrets in Cloudflare before deploying:
 
 Set the Worker `RAILWAY_URL` (or `BACKEND_URL`) to the public HTTPS origin for the VexoStream Core service. Do not put `EDGE_TOKEN` in Flutter or in the repository. If using the admin panel's backend override, that saved value takes precedence over the Worker variable.
 
-The Worker serves:
+The Worker serves these Cloudflare zone routes:
 
-- `vexostream.bond/*` and `www.vexostream.bond/*` (zone routes)
-- `api.vexostream.bond` (custom domain, DNS created by Wrangler)
+- `vexostream.bond/*`
+- `www.vexostream.bond/*`
+- `api.vexostream.bond/*` for the API and media proxy
 
-`api.vexostream.bond` is configured as a Worker **custom domain**, so `npx wrangler deploy` creates its DNS record and certificate automatically (if an old `api` DNS record already exists in Cloudflare, delete it first). Until it is live, the Windows app automatically falls back to `https://vexostream.bond/api/v1`, which the same Worker serves. The API app's default base URL is already set to `https://api.vexostream.bond/api/v1`; use `--dart-define=VEXOSTREAM_API_BASE=...` only if you need another API origin.
+The API uses a Worker **Route**, not a Custom Domain. Keep an existing proxied DNS record for `api` in the `vexostream.bond` zone; unlike a Custom Domain, a Route does not create DNS records or issue a separate certificate. The Windows app tries `https://api.vexostream.bond/api/v1` first and falls back to `https://vexostream.bond/api/v1`, which the same Worker also serves. Use `--dart-define=VEXOSTREAM_API_BASE=...` only if you need another API origin.
 
 ## Deploy site and API manually from Windows CMD
 
@@ -139,7 +140,7 @@ npx wrangler deploy
 
 Wrangler does not run the source build automatically. `npx wrangler deploy` works from the supplied ZIP because the tested `dist/worker.js` is included; `npm run build` regenerates it after source edits. Normal GitHub pushes run Flutter tests and generate the Windows release artifact only. They do not build or deploy the site.
 
-`site/wrangler.toml` carries forward the zone and D1 IDs from the supplied archive. Confirm they belong to your Cloudflare account and replace them if you created different databases. Ensure `api.vexostream.bond` has a proxied DNS record in that zone. Set `STREAM_SIGN_SECRET` and `EDGE_TOKEN` as Worker secrets, and configure `RAILWAY_URL`/`BACKEND_URL` to the separate VexoStream Core service. Authenticate with Wrangler locally, or use a Cloudflare API token in your terminal environment. Don’t commit credentials.
+`site/wrangler.toml` carries forward the zone and D1 IDs from the supplied archive. Confirm they belong to your Cloudflare account and replace them if you created different databases. Ensure `api.vexostream.bond` has a proxied DNS record in that zone for the Worker Route. Set `STREAM_SIGN_SECRET` and `EDGE_TOKEN` as Worker secrets, and configure `RAILWAY_URL`/`BACKEND_URL` to the separate VexoStream Core service. Authenticate with Wrangler locally, or use a Cloudflare API token in your terminal environment. Don’t commit credentials.
 
 ## Local source checks
 

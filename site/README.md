@@ -38,4 +38,4 @@ The Worker also creates this table lazily, but applying the migration explicitly
 
 Confirm that `wrangler.toml` points at the Cloudflare zone and D1 database IDs you intend to use. In Cloudflare, configure `STREAM_SIGN_SECRET` and `EDGE_TOKEN` as Worker secrets, and set `RAILWAY_URL` or `BACKEND_URL` to your public VexoStream Core backend. Never put `EDGE_TOKEN` in the Flutter app or commit secrets.
 
-The Worker serves `vexostream.bond/*` and `www.vexostream.bond/*`, plus `api.vexostream.bond` as a custom domain. `npx wrangler deploy` creates the `api` DNS record and certificate for you; if Cloudflare already has an `api` DNS record, delete it before deploying.
+The Worker serves `vexostream.bond/*`, `www.vexostream.bond/*`, and `api.vexostream.bond/*` through Cloudflare zone routes. The API uses a Worker Route, not a Custom Domain. Routes require an existing proxied DNS record for `api` in the `vexostream.bond` zone; Wrangler does not create that DNS record or a separate certificate.

@@ -18,8 +18,9 @@ test('Worker exposes the app pages through the versioned API', () => {
   assert.ok(router.includes("'Access-Control-Allow-Headers': 'Authorization, Content-Type"));
 });
 
-test('API is routed on the requested subdomain and sessions persist hashes only', () => {
-  assert.ok(/pattern = "api\.vexostream\.bond", custom_domain = true/.test(wrangler));
+test('API uses a zone route, not a custom domain, and sessions persist hashes only', () => {
+  assert.ok(/pattern = "api\.vexostream\.bond\/\*", zone_name = "vexostream\.bond"/.test(wrangler));
+  assert.ok(!wrangler.includes('custom_domain = true'));
   assert.ok(migration.includes('token_hash TEXT PRIMARY KEY'));
   assert.ok(migration.includes('revoked_at TEXT'));
   assert.ok(!migration.toLowerCase().includes('token TEXT'));

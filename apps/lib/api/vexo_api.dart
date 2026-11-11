@@ -19,10 +19,9 @@ class ApiException implements Exception {
 
 /// Talks to the VexoStream Worker API.
 ///
-/// Primary host is api.vexostream.bond. The same Worker also answers on
-/// vexostream.bond/api/v1, so if the API subdomain can't be reached (for
-/// example its DNS record isn't live yet) the client switches over
-/// automatically and keeps using whichever host works.
+/// Primary host is api.vexostream.bond, served through a Cloudflare Worker
+/// Route. The same Worker also answers on vexostream.bond/api/v1, so if the
+/// API subdomain can't be reached the client switches over automatically.
 class VexoApi {
   VexoApi({http.Client? client}) : _client = client ?? http.Client();
 
