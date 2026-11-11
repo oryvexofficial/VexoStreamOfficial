@@ -1,0 +1,66 @@
+name: Build and test
+
+on:
+  push:
+    branches: [main, master]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  worker:
+    name: Check site and API Worker
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install Worker dependencies
+        working-directory: site
+        run: npm install --no-audit --no-fund
+      - name: Build and test Worker
+        working-directory: site
+        run: npm test
+      - name: Validate generated Worker JavaScript
+        working-directory: site
+        run: node --check dist/worker.js
+
+  windows-app:
+    name: Build VexoStream for Windows
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Generate Windows runner if needed
+        working-directory: apps
+        shell: pwsh
+        run: |
+          if (!(Test-Path 'windows/CMakeLists.txt')) {
+            flutter create --platforms=windows --project-name=vexostream_app --org=bond.vexostream .
+          }
+      - name: Resolve Flutter packages
+        working-directory: apps
+        run: flutter pub get
+      - name: Run Flutter tests
+        working-directory: apps
+        run: flutter test
+      - name: Build release application
+        working-directory: apps
+        run: flutter build windows --release
+      - name: Package Windows release
+        working-directory: apps
+        shell: pwsh
+        run: Compress-Archive -Path 'build/windows/x64/runner/Release/*' -DestinationPath 'VexoStream-Windows.zip' -Force
+      - uses: actions/upload-artifact@v4
+        with:
+          name: VexoStream-Windows
+          path: apps/VexoStream-Windows.zip
+          if-no-files-found: error
+          retention-days: 30
