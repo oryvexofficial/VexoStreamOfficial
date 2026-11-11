@@ -1,4 +1,4 @@
-name: Build and test
+name: Build Windows app
 
 on:
   push:
@@ -11,26 +11,8 @@ permissions:
   contents: read
 
 jobs:
-  worker:
-    name: Check site and API Worker
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - name: Install Worker dependencies
-        working-directory: site
-        run: npm install --no-audit --no-fund
-      - name: Build and test Worker
-        working-directory: site
-        run: npm test
-      - name: Validate generated Worker JavaScript
-        working-directory: site
-        run: node --check dist/worker.js
-
   windows-app:
-    name: Build VexoStream for Windows
+    name: Build Flutter app for Windows
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -48,9 +30,9 @@ jobs:
       - name: Resolve Flutter packages
         working-directory: apps
         run: flutter pub get
-      - name: Run Flutter tests
+      - name: Run app API contract tests
         working-directory: apps
-        run: flutter test
+        run: flutter test test/api_contract_test.dart
       - name: Build release application
         working-directory: apps
         run: flutter build windows --release

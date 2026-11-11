@@ -2,7 +2,6 @@
 site/node_modules/
 site/.wrangler/
 site/.build/
-site/dist/
 *.log
 
 # Flutter / Dart
