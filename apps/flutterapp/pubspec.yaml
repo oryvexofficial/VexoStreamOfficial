@@ -1,5 +1,5 @@
 name: vexostream_app
-description: VexoStream Windows desktop app.
+description: VexoStream Windows and Android app.
 publish_to: none
 version: 1.0.0+1
 

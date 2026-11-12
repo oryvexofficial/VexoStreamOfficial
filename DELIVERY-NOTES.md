@@ -6,7 +6,8 @@
 - Player: keeps the first-party player video path intact while omitting the broken loading poster, and adds “More like this,” the website keyboard-shortcut reference, share/embed snippets, and device-local Continue Watching with progress and resume.
 - Offline/update gates: animated no-connection modal with retry and reconnection handling; stable GitHub release check; mandatory update gate with verified Windows installer or Android APK link; explicit failed/unconfigured states, retry, and continue-with-warning.
 - Android/general: responsive drawer and page layouts, Check Host country flags, contrast/switch styling, and an APK CI build with the default Flutter ABI set.
-- Windows/release: corrected NSIS output path under `apps/flutterapp/installer/`, a standalone NSIS artifact plus a Windows bundle with the portable ZIP, and tag-triggered GitHub Releases. Missing `APP_KEY` is labeled validation-only and produces a pre-release, excluded from stable update checks.
+- Android branding: `prepare_android.sh` sets the installed app label to `VexoStream` and installs density/adaptive launcher icons derived from the same artwork as the Windows desktop icon.
+- Windows/release: corrected NSIS output path under `apps/flutterapp/installer/`, a standalone NSIS artifact plus a Windows bundle with the portable ZIP, and automatic stable GitHub Releases after successful `main`/`master` builds when the version tag is new. Each release creates a stable `vMAJOR.MINOR.PATCH` tag and uploads the Windows installer, portable ZIP, and universal Android APK. Releases are never marked prerelease; existing version tags are not overwritten. Missing `APP_KEY` remains clearly labeled validation-only, and protected API calls will not work in those binaries.
 - Website Worker source and compiled bundle remain in `site/`; deploy it separately for the server-side no-poster player change.
 
 ## Platform notes

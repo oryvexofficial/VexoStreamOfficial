@@ -236,35 +236,84 @@ jobs:
 
   release:
     name: Publish GitHub Release
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: >-
+      github.event_name == 'push' &&
+      (
+        github.ref == 'refs/heads/main' ||
+        github.ref == 'refs/heads/master' ||
+        startsWith(github.ref, 'refs/tags/v')
+      )
     needs: [website, android, windows]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     env:
       APP_KEY: ${{ secrets.APP_KEY }}
+      RELEASE_TAG: ${{ needs.windows.outputs.tag_name }}
     steps:
       - name: Validate tag matches the app version
         env:
           APP_VERSION: ${{ needs.windows.outputs.app_version }}
         shell: bash
         run: |
-          tag_version="${GITHUB_REF_NAME#v}"
+          tag_version="${RELEASE_TAG#v}"
           tag_base="${tag_version%%-*}"
           if [[ "$tag_base" != "$APP_VERSION" ]]; then
-            echo "Tag $GITHUB_REF_NAME does not match app version $APP_VERSION in pubspec.yaml." >&2
+            echo "Release tag $RELEASE_TAG does not match app version $APP_VERSION in pubspec.yaml." >&2
             exit 1
           fi
-          if [[ ! "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
-            echo "Release tag must use a version tag such as v1.0.0." >&2
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Stable release tag must use a version such as v1.0.0, with no pre-release suffix." >&2
             exit 1
           fi
+      - name: Verify automatic release tag is safe
+        id: tag_check
+        if: github.ref_type == 'branch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "should_release=true" >> "$GITHUB_OUTPUT"
+          ref_url="$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG"
+          response_file="$(mktemp)"
+          status="$(curl -sS -o "$response_file" -w '%{http_code}' \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H 'Accept: application/vnd.github+json' \
+            "$ref_url")"
+          if [[ "$status" == "404" ]]; then
+            echo "Tag $RELEASE_TAG is new; it will be created with this release."
+            exit 0
+          fi
+          if [[ "$status" != "200" ]]; then
+            cat "$response_file" >&2
+            echo "Could not verify whether tag $RELEASE_TAG already exists (HTTP $status)." >&2
+            exit 1
+          fi
+          object_type="$(jq -r '.object.type' "$response_file")"
+          object_sha="$(jq -r '.object.sha' "$response_file")"
+          while [[ "$object_type" == "tag" ]]; do
+            tag_object="$(curl -fsS \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H 'Accept: application/vnd.github+json' \
+              "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/git/tags/$object_sha")"
+            object_type="$(jq -r '.object.type' <<< "$tag_object")"
+            object_sha="$(jq -r '.object.sha' <<< "$tag_object")"
+          done
+          if [[ "$object_type" != "commit" || "$object_sha" != "$GITHUB_SHA" ]]; then
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Skipping release: tag $RELEASE_TAG already points to a different commit. Bump the app version in apps/flutterapp/pubspec.yaml to publish another release."
+            exit 0
+          fi
+          echo "Tag $RELEASE_TAG already points to this commit; safe to retry the release."
       - uses: actions/download-artifact@v4
+        if: github.ref_type == 'tag' || steps.tag_check.outputs.should_release == 'true'
         with:
           pattern: VexoStream-*-${{ needs.windows.outputs.label }}-${{ needs.windows.outputs.tag_name }}
           path: release-input
           merge-multiple: false
       - name: Prepare release assets
+        if: github.ref_type == 'tag' || steps.tag_check.outputs.should_release == 'true'
         env:
           BUILD_LABEL: ${{ needs.windows.outputs.label }}
         shell: bash
@@ -272,7 +321,7 @@ jobs:
           mkdir -p release-assets
           suffix=""
           if [[ "$BUILD_LABEL" != "api-ready" ]]; then suffix="-$BUILD_LABEL"; fi
-          tag="$GITHUB_REF_NAME"
+          tag="$RELEASE_TAG"
           copy_first() {
             local name="$1"
             local destination="$2"
@@ -294,14 +343,17 @@ jobs:
               > "release-assets/VexoStream-$tag-VALIDATION-NO-APP_KEY.txt"
           fi
       - name: Publish release
+        if: github.ref_type == 'tag' || steps.tag_check.outputs.should_release == 'true'
         uses: softprops/action-gh-release@v2
         with:
-          name: VexoStream ${{ github.ref_name }}
+          tag_name: ${{ needs.windows.outputs.tag_name }}
+          target_commitish: ${{ github.sha }}
+          name: VexoStream ${{ needs.windows.outputs.tag_name }}
           body: |
-            VexoStream ${{ github.ref_name }} release.
-            ${{ env.APP_KEY == '' && 'VALIDATION BUILD: APP_KEY is missing. Protected API calls will not work. This release is marked as a pre-release and is excluded from automatic stable update checks.' || 'API-ready build. Windows installer, portable ZIP, and universal Android APK are attached.' }}
+            VexoStream ${{ needs.windows.outputs.tag_name }} release.
+            ${{ env.APP_KEY == '' && 'VALIDATION BUILD: APP_KEY is missing. Protected API calls will not work. Add the APP_KEY repository secret and publish a new app version for API-ready builds.' || 'API-ready build. Windows installer, portable ZIP, and universal Android APK are attached.' }}
           files: release-assets/*
           draft: false
-          prerelease: ${{ env.APP_KEY == '' || contains(github.ref_name, '-') }}
-          make_latest: ${{ env.APP_KEY != '' && !contains(github.ref_name, '-') }}
+          prerelease: false
+          make_latest: true
           fail_on_unmatched_files: true
