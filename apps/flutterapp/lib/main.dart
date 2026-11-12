@@ -543,6 +543,36 @@ class _AppMaintenancePageState extends State<_AppMaintenancePage> {
       );
 }
 
+class _AdminToolsLockedPage extends StatelessWidget {
+  const _AdminToolsLockedPage();
+
+  @override
+  Widget build(BuildContext context) => Center(
+        child: Card(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.lock_outline_rounded, size: 34, color: Vx.blue),
+                const SizedBox(height: 12),
+                Text(
+                  'Owner or admin access required',
+                  style: Vx.sans(size: 18, weight: FontWeight.w700),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Sign in with an owner or admin account to open developer tools.',
+                  textAlign: TextAlign.center,
+                  style: Vx.sans(size: 14, color: Vx.text2),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+}
+
 enum _Page { home, browse, models, social, developers, status, checkHost, admin, account }
 
 class VexoShell extends StatefulWidget {
@@ -571,7 +601,7 @@ class _VexoShellState extends State<VexoShell> {
     (_Page.browse, 'Browse', Icons.video_library_outlined, Icons.video_library_rounded),
     (_Page.models, 'Models', Icons.people_alt_outlined, Icons.people_alt_rounded),
     (_Page.social, 'Social media', Icons.forum_outlined, Icons.forum_rounded),
-    (_Page.developers, 'Developers', Icons.code_rounded, Icons.code_rounded),
+    (_Page.developers, 'Developer tools', Icons.code_rounded, Icons.code_rounded),
     (_Page.status, 'Status', Icons.monitor_heart_outlined, Icons.monitor_heart_rounded),
     (_Page.checkHost, 'Check host', Icons.dns_outlined, Icons.dns_rounded),
   ];
@@ -604,16 +634,27 @@ class _VexoShellState extends State<VexoShell> {
 
   Future<void> _loadAccount() async {
     if (!widget.signedIn) {
-      if (mounted) setState(() { _username = ''; _isAdmin = false; });
+      if (mounted) setState(() {
+        _username = '';
+        _isAdmin = false;
+        if (_page == _Page.developers || _page == _Page.admin) {
+          _page = _Page.home;
+        }
+      });
       return;
     }
     try {
       final data = asMap(await widget.api.get('/account', authenticated: true));
       final account = asMap(data['account']);
       if (!widget.signedIn) return;
+      final canAccessTools = canAccessDeveloperTools(account);
       if (mounted) setState(() {
         _username = (account['username'] ?? '').toString();
-        _isAdmin = account['isOwner'] == true || account['role'] == 'Owner' || account['role'] == 'Admin';
+        _isAdmin = canAccessTools;
+        if (!canAccessTools &&
+            (_page == _Page.developers || _page == _Page.admin)) {
+          _page = _Page.home;
+        }
       });
       if (_isAdmin) _loadProviders();
     } on ApiException catch (e) {
@@ -655,6 +696,9 @@ class _VexoShellState extends State<VexoShell> {
 
   void _go(_Page page) {
     if (page == _Page.browse) return _browse(_provider);
+    if ((page == _Page.developers || page == _Page.admin) && !_isAdmin) {
+      return;
+    }
     setState(() => _page = page);
   }
 
@@ -663,21 +707,28 @@ class _VexoShellState extends State<VexoShell> {
         _Page.browse => CatalogPage(key: ValueKey('browse-$_browseKey'), api: widget.api, onPlay: _openPlayer, initialQuery: _query, initialProvider: _provider),
         _Page.models => ModelsPage(api: widget.api, onSignIn: () => _openAuth()),
         _Page.social => SocialPage(api: widget.api),
-        _Page.developers => DevelopersPage(api: widget.api),
+        _Page.developers => _isAdmin
+            ? DevelopersPage(api: widget.api)
+            : const _AdminToolsLockedPage(),
         _Page.status => StatusPage(api: widget.api),
         _Page.checkHost => CheckHostPage(api: widget.api),
-        _Page.admin => AdminPage(api: widget.api, onNavigate: (destination) => setState(() {
-          _page = switch (destination) {
-            AdminDestination.home => _Page.home,
-            AdminDestination.social => _Page.social,
-            AdminDestination.status => _Page.status,
-          };
-        })),
+        _Page.admin => _isAdmin
+            ? AdminPage(
+                api: widget.api,
+                onNavigate: (destination) => setState(() {
+                  _page = switch (destination) {
+                    AdminDestination.home => _Page.home,
+                    AdminDestination.social => _Page.social,
+                    AdminDestination.status => _Page.status,
+                  };
+                }),
+              )
+            : const _AdminToolsLockedPage(),
         _Page.account => AccountPage(
             key: ValueKey('account-$_accountKey-${widget.signedIn}'),
             api: widget.api,
             onSignIn: () => _openAuth(),
-            onOpenAdmin: () => setState(() => _page = _Page.admin),
+            onOpenAdmin: () => _go(_Page.admin),
             onSignedOut: () {
               widget.onSessionChanged(false);
               setState(() => _page = _Page.home);
@@ -800,7 +851,9 @@ class _VexoShellState extends State<VexoShell> {
       width: wide ? 248 : 76,
       decoration: const BoxDecoration(color: Vx.bg, border: Border(right: BorderSide(color: Vx.line))),
       child: ListView(padding: const EdgeInsets.fromLTRB(12, 16, 12, 16), children: [
-        for (final item in _nav) _NavItem(label: item.$2, icon: item.$3, activeIcon: item.$4, active: _page == item.$1, wide: wide, onTap: () { if (drawer) Navigator.of(context).pop(); _go(item.$1); }),
+        for (final item in _nav.where((item) =>
+            item.$1 != _Page.developers || _isAdmin))
+          _NavItem(label: item.$2, icon: item.$3, activeIcon: item.$4, active: _page == item.$1, wide: wide, onTap: () { if (drawer) Navigator.of(context).pop(); _go(item.$1); }),
         if (_isAdmin)
           _NavItem(label: 'Admin', icon: Icons.admin_panel_settings_outlined, activeIcon: Icons.admin_panel_settings_rounded, active: _page == _Page.admin, wide: wide, onTap: () { if (drawer) Navigator.of(context).pop(); _go(_Page.admin); }),
         if (live.isNotEmpty) ...[

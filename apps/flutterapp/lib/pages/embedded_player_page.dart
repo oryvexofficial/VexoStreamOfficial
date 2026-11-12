@@ -46,6 +46,7 @@ class _PlayerPageState extends State<PlayerPage> {
   String? _relatedError;
   Timer? _historyTimer;
   bool _savingHistory = false;
+  bool _isFullscreen = false;
 
   @override
   void initState() {
@@ -129,125 +130,195 @@ class _PlayerPageState extends State<PlayerPage> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
   }
 
+  Future<void> _setFullscreen(bool fullscreen) async {
+    if (_isFullscreen == fullscreen) return;
+    if (Platform.isAndroid) {
+      try {
+        if (fullscreen) {
+          await SystemChrome.setPreferredOrientations(const [
+            DeviceOrientation.landscapeLeft,
+            DeviceOrientation.landscapeRight,
+          ]);
+          await SystemChrome.setEnabledSystemUIMode(
+            SystemUiMode.immersiveSticky,
+          );
+        } else {
+          await _restoreSystemUi();
+        }
+      } catch (_) {
+        // Keep the in-app fullscreen surface usable if a device rejects a
+        // system orientation or UI-mode change.
+      }
+    }
+    if (mounted) setState(() => _isFullscreen = fullscreen);
+  }
+
+  Future<void> _restoreSystemUi() async {
+    await SystemChrome.setPreferredOrientations(const []);
+    await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+  }
+
   @override
   Widget build(BuildContext context) {
     final embed = providerEmbedForVideo(widget.video);
     final title = _title.isEmpty ? 'VexoStream Player' : _title;
     final provider = firstText(widget.video, const ['provider']);
 
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
-        actions: [
-          if (embed != null)
-            IconButton(
-              tooltip: 'Share or embed this video',
-              onPressed: () => showDialog<void>(
-                context: context,
-                builder: (_) => _ShareEmbedDialog(
-                  sourceUrl: embed.sourceUri.toString(),
-                  embedUrl: embed.embedUri.toString(),
-                ),
-              ),
-              icon: const Icon(Icons.ios_share_rounded),
-            ),
-          if (embed != null)
-            IconButton(
-              tooltip: 'Copy VexoStream embed link',
-              onPressed: () => _copy(context, embed.embedUri.toString(), 'VexoStream embed link copied'),
-              icon: const Icon(Icons.link_rounded),
-            ),
-          const SizedBox(width: 8),
-        ],
-      ),
-      body: PageBody(
-        maxWidth: 1240,
-        padding: const EdgeInsets.fromLTRB(28, 24, 28, 40),
-        children: [
-          AspectRatio(
-            aspectRatio: 16 / 9,
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(Vx.radiusXl),
-              child: ColoredBox(
-                color: Colors.black,
-                child: embed == null
-                    ? _unsupportedSource(context)
-                    : Platform.isAndroid
-                    ? AndroidEmbedView(
-                        key: _androidEmbedKey,
-                        embed: embed,
-                        video: widget.video,
-                        api: widget.api,
-                        onBack: () => Navigator.of(context).maybePop(),
-                        onSignIn: widget.onSignIn,
-                        onQualityStateChanged: _updateQualityState,
-                      )
-                    : VexoEmbedView(
-                        key: _embedKey,
-                        embed: embed,
-                        video: widget.video,
-                        api: widget.api,
-                        onBack: () => Navigator.of(context).maybePop(),
-                        onSignIn: widget.onSignIn,
-                        onQualityStateChanged: _updateQualityState,
+    return PopScope<Object?>(
+      canPop: !_isFullscreen,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop && _isFullscreen) unawaited(_setFullscreen(false));
+      },
+      child: _isFullscreen
+          ? Scaffold(
+              backgroundColor: Colors.black,
+              body: SizedBox.expand(child: _playerSurface(embed)),
+            )
+          : Scaffold(
+              appBar: AppBar(
+                title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
+                actions: [
+                  if (embed != null)
+                    IconButton(
+                      tooltip: 'Share or embed this video',
+                      onPressed: () => showDialog<void>(
+                        context: context,
+                        builder: (_) => _ShareEmbedDialog(
+                          sourceUrl: embed.sourceUri.toString(),
+                          embedUrl: embed.embedUri.toString(),
+                        ),
                       ),
+                      icon: const Icon(Icons.ios_share_rounded),
+                    ),
+                  if (embed != null)
+                    IconButton(
+                      tooltip: 'Copy VexoStream embed link',
+                      onPressed: () => _copy(context, embed.embedUri.toString(), 'VexoStream embed link copied'),
+                      icon: const Icon(Icons.link_rounded),
+                    ),
+                  const SizedBox(width: 8),
+                ],
+              ),
+              body: PageBody(
+                maxWidth: 1240,
+                padding: const EdgeInsets.fromLTRB(28, 24, 28, 40),
+                children: [
+                  AspectRatio(
+                    aspectRatio: 16 / 9,
+                    child: _playerSurface(embed),
+                  ),
+                  if (embed != null) ...[
+                    const SizedBox(height: 20),
+                    _qualityCard(),
+                  ],
+                  const SizedBox(height: 20),
+                  Text(title, style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontSize: 24)),
+                  const SizedBox(height: 10),
+                  Row(children: [
+                    if (provider.isNotEmpty) ...[
+                      ProviderIcon(id: provider.toLowerCase(), name: provider, size: 22),
+                      const SizedBox(width: 8),
+                      Text(
+                        provider[0].toUpperCase() + provider.substring(1),
+                        style: Vx.sans(size: 14, color: Vx.text2, weight: FontWeight.w500),
+                      ),
+                      const SizedBox(width: 14),
+                    ],
+                    Expanded(
+                      child: Text(
+                        _target,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Vx.mono(size: 12),
+                      ),
+                    ),
+                    TextButton.icon(
+                      onPressed: () => _copy(context, _target, 'Original video link copied'),
+                      icon: const Icon(Icons.copy_rounded, size: 16),
+                      label: const Text('Copy link'),
+                    ),
+                  ]),
+                  const SizedBox(height: 32),
+                  _shortcuts(),
+                  const SizedBox(height: 32),
+                  const PageHeading(title: 'More like this', large: false),
+                  if (_relatedError != null)
+                    Text(_relatedError!, style: Vx.sans(size: 14, color: Vx.text2))
+                  else if (!_relatedLoading && _related.isEmpty)
+                    Text('No similar videos found.', style: Vx.sans(size: 14, color: Vx.text2))
+                  else
+                    VideoGrid(
+                      api: widget.api, items: _related, loading: _relatedLoading, skeletons: 4,
+                      onPlay: (video) => Navigator.of(context).pushReplacement(MaterialPageRoute(
+                        builder: (_) => PlayerPage(api: widget.api, video: video, onSignIn: widget.onSignIn),
+                      )),
+                    ),
+                ],
               ),
             ),
-          ),
-          if (embed != null) ...[
-            const SizedBox(height: 20),
-            _qualityCard(),
-          ],
-          const SizedBox(height: 20),
-          Text(title, style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontSize: 24)),
-          const SizedBox(height: 10),
-          Row(children: [
-            if (provider.isNotEmpty) ...[
-              ProviderIcon(id: provider.toLowerCase(), name: provider, size: 22),
-              const SizedBox(width: 8),
-              Text(
-                provider[0].toUpperCase() + provider.substring(1),
-                style: Vx.sans(size: 14, color: Vx.text2, weight: FontWeight.w500),
-              ),
-              const SizedBox(width: 14),
-            ],
-            Expanded(
-              child: Text(
-                _target,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: Vx.mono(size: 12),
-              ),
-            ),
-            TextButton.icon(
-              onPressed: () => _copy(context, _target, 'Original video link copied'),
-              icon: const Icon(Icons.copy_rounded, size: 16),
-              label: const Text('Copy link'),
-            ),
-          ]),
-          const SizedBox(height: 32),
-          _shortcuts(),
-          const SizedBox(height: 32),
-          const PageHeading(title: 'More like this', large: false),
-          if (_relatedError != null)
-            Text(_relatedError!, style: Vx.sans(size: 14, color: Vx.text2))
-          else if (!_relatedLoading && _related.isEmpty)
-            Text('No similar videos found.', style: Vx.sans(size: 14, color: Vx.text2))
-          else
-            VideoGrid(
-              api: widget.api, items: _related, loading: _relatedLoading, skeletons: 4,
-              onPlay: (video) => Navigator.of(context).pushReplacement(MaterialPageRoute(
-                builder: (_) => PlayerPage(api: widget.api, video: video, onSignIn: widget.onSignIn),
-              )),
-            ),
-        ],
-      ),
     );
   }
+
+  Widget _playerSurface(ProviderEmbedInfo? embed) => Stack(
+        fit: StackFit.expand,
+        children: [
+          ClipRRect(
+            borderRadius: _isFullscreen
+                ? BorderRadius.zero
+                : BorderRadius.circular(Vx.radiusXl),
+            child: ColoredBox(
+              color: Colors.black,
+              child: embed == null
+                  ? _unsupportedSource(context)
+                  : Platform.isAndroid
+                      ? AndroidEmbedView(
+                          key: _androidEmbedKey,
+                          embed: embed,
+                          video: widget.video,
+                          api: widget.api,
+                          onBack: () => Navigator.of(context).maybePop(),
+                          onSignIn: widget.onSignIn,
+                          onQualityStateChanged: _updateQualityState,
+                        )
+                      : VexoEmbedView(
+                          key: _embedKey,
+                          embed: embed,
+                          video: widget.video,
+                          api: widget.api,
+                          onBack: () => Navigator.of(context).maybePop(),
+                          onSignIn: widget.onSignIn,
+                          onQualityStateChanged: _updateQualityState,
+                        ),
+            ),
+          ),
+          if (embed != null)
+            Positioned(
+              top: 10,
+              left: 10,
+              child: Material(
+                color: Colors.black.withValues(alpha: .68),
+                shape: const CircleBorder(),
+                child: IconButton(
+                  tooltip: _isFullscreen ? 'Exit full screen' : 'Full screen',
+                  onPressed: () => unawaited(_setFullscreen(!_isFullscreen)),
+                  icon: Icon(
+                    _isFullscreen
+                        ? Icons.fullscreen_exit_rounded
+                        : Icons.fullscreen_rounded,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+            ),
+        ],
+      );
 
   @override
   void dispose() {
     _historyTimer?.cancel();
+    if (_isFullscreen && Platform.isAndroid) {
+      unawaited(_restoreSystemUi());
+    }
     super.dispose();
   }
 

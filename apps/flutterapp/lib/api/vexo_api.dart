@@ -297,6 +297,11 @@ Map<String, dynamic> asMap(dynamic value) => value is Map<String, dynamic>
         ? value.map((key, item) => MapEntry(key.toString(), item))
         : <String, dynamic>{};
 
+bool canAccessDeveloperTools(Map<String, dynamic> account) {
+  final role = account['role']?.toString().trim().toLowerCase();
+  return account['isOwner'] == true || role == 'owner' || role == 'admin';
+}
+
 List<dynamic> asList(dynamic value) => value is List ? value : <dynamic>[];
 
 String defaultSearchQuery(dynamic config) {

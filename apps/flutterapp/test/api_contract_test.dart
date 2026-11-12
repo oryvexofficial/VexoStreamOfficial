@@ -20,6 +20,15 @@ void main() {
     expect(defaultSearchQuery(null), 'trending');
   });
 
+  test('developer tools are limited to owner and admin accounts', () {
+    expect(canAccessDeveloperTools({'isOwner': true}), isTrue);
+    expect(canAccessDeveloperTools({'role': 'Owner'}), isTrue);
+    expect(canAccessDeveloperTools({'role': 'Admin'}), isTrue);
+    expect(canAccessDeveloperTools({'role': 'admin'}), isTrue);
+    expect(canAccessDeveloperTools({'role': 'Member'}), isFalse);
+    expect(canAccessDeveloperTools({}), isFalse);
+  });
+
   test('catalogue normalizes thumbnail aliases and allows poster enrichment', () {
     final items = videoItems([
       {'url': 'https://www.xvideos.com/video1', 'thumbnail_url': 'https://img.example.test/a.jpg'},

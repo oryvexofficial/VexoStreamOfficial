@@ -23,30 +23,6 @@ if p.exists():
             s = s.replace('<application', f'<uses-permission android:name="{permission}"/>\n    <application', 1)
     p.write_text(s)
 
-lint_vital_block = """
-subprojects {
-    afterEvaluate {
-        tasks.matching { it.name.startsWith("lintVital") }.configureEach {
-            enabled = false
-        }
-    }
-}
-"""
-
-root_gradle_kts = Path('android/build.gradle.kts')
-if root_gradle_kts.exists():
-    content = root_gradle_kts.read_text()
-    if 'lintVital' not in content:
-        content += lint_vital_block
-        root_gradle_kts.write_text(content)
-
-root_gradle = Path('android/build.gradle')
-if root_gradle.exists():
-    content = root_gradle.read_text()
-    if 'lintVital' not in content:
-        content += lint_vital_block
-        root_gradle.write_text(content)
-
 def ensure_lint_settings(path, block_name):
     if not path.exists():
         return
