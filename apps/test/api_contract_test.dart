@@ -91,6 +91,13 @@ void main() {
     expect(hosts.last, 'api.vexostream.bond');
   });
 
+  test('API shows the Core service detail instead of a generic HTTP 400', () async {
+    final client = MockClient((request) async => http.Response('{"detail":"gender must be Female, Male, or Female,Male"}', 400));
+    final api = VexoApi(client: client);
+    await expectLater(api.get('/models'), throwsA(isA<ApiException>().having((e) => e.message, 'message', contains('gender must be Female, Male, or Female,Male'))));
+    api.close();
+  });
+
   test('wrong APP_KEY is not misreported as a member-login failure', () {
     const error = ApiException('The app API key is missing or does not match the Worker key.', statusCode: 401, code: 'app_key_invalid');
     expect(error.needsLogin, isFalse);

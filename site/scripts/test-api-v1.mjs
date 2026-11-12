@@ -7,6 +7,7 @@ const router = await readFile(new URL('../src/07-router.ts', import.meta.url), '
 const wrangler = await readFile(new URL('../wrangler.toml', import.meta.url), 'utf8');
 const migration = await readFile(new URL('../migrations/2026-11-11-api-sessions.sql', import.meta.url), 'utf8');
 const adminMigration = await readFile(new URL('../migrations/2026-11-12-admin-api-sessions.sql', import.meta.url), 'utf8');
+const social = await readFile(new URL('../src/05b-social.ts', import.meta.url), 'utf8');
 
 test('Worker exposes the app pages through the versioned API', () => {
   for (const route of [
@@ -14,8 +15,11 @@ test('Worker exposes the app pages through the versioned API', () => {
     "path === '/auth/signup'", "path === '/auth/login'", "path === '/auth/logout'", "path === '/account'",
     "path === '/videos/extract'", "path === '/models'", "path === '/status'", "path === '/social'",
     "path === '/developers'", "path === '/image'", "path === '/check-host/start'", "path === '/check-host/result'",
-    "defaultQuery: cfg.defaultQuery || 'trending'"
+    "defaultQuery: cfg.defaultQuery || 'trending'","path === '/admin/team'","path === '/admin/password'",
+    "path === '/admin/members'","path === '/admin/live'","path === '/admin/social'","path === '/admin/telegram'","path === '/admin/operations'",
+    "action === 'check_channel'", "action === 'repair'"
   ]) assert.ok(api.includes(route), `missing API contract: ${route}`);
+  assert.ok(social.includes("action === 'bot_import_tg'"), 'missing Telegram bot import action');
   assert.ok(router.includes('handleAppApiV1(request, url, env, ctx)'));
   assert.ok(router.includes("'Access-Control-Allow-Headers': 'Authorization, Content-Type"));
 });

@@ -298,11 +298,18 @@ class _VexoShellState extends State<VexoShell> {
         _Page.developers => DevelopersPage(api: widget.api),
         _Page.status => StatusPage(api: widget.api),
         _Page.checkHost => CheckHostPage(api: widget.api),
-        _Page.admin => AdminPage(api: widget.api),
+        _Page.admin => AdminPage(api: widget.api, onNavigate: (destination) => setState(() {
+          _page = switch (destination) {
+            AdminDestination.home => _Page.home,
+            AdminDestination.social => _Page.social,
+            AdminDestination.status => _Page.status,
+          };
+        })),
         _Page.account => AccountPage(
             key: ValueKey('account-$_accountKey-${widget.signedIn}'),
             api: widget.api,
             onSignIn: () => _openAuth(),
+            onOpenAdmin: () => setState(() => _page = _Page.admin),
             onSignedOut: () {
               widget.onSessionChanged(false);
               setState(() => _page = _Page.home);

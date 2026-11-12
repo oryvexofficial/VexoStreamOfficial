@@ -4,10 +4,11 @@ import '../api/vexo_api.dart';
 import '../widgets/vexo_theme.dart';
 
 class AccountPage extends StatefulWidget {
-  const AccountPage({super.key, required this.api, required this.onSignIn, required this.onSignedOut});
+  const AccountPage({super.key, required this.api, required this.onSignIn, required this.onSignedOut, required this.onOpenAdmin});
   final VexoApi api;
   final VoidCallback onSignIn;
   final VoidCallback onSignedOut;
+  final VoidCallback onOpenAdmin;
   @override
   State<AccountPage> createState() => _AccountPageState();
 }
@@ -74,7 +75,9 @@ class _AccountPageState extends State<AccountPage> {
           child: ErrorPanel(
             message: _error!,
             onRetry: _apiError?.needsLogin == true ? null : _load,
-            action: FilledButton(onPressed: widget.onSignIn, child: const Text('Log in')),
+            action: _apiError?.needsLogin == true
+                ? FilledButton(onPressed: widget.onSignIn, child: const Text('Log in'))
+                : OutlinedButton(onPressed: _load, child: const Text('Try again')),
           ),
         )
       else
@@ -102,15 +105,24 @@ class _AccountPageState extends State<AccountPage> {
             const SizedBox(height: 22),
             const Divider(),
             _row('Account ID', (_account['id'] ?? '').toString()),
-            _row('Joined', '${_account['createdAt'] ?? 'Unknown'} UTC'),
-            _row('Last sign-in', '${_account['lastLoginAt'] ?? 'Not available'} UTC'),
+            _row('Joined', _accountDate('createdAt', 'Unknown')),
+            _row('Last sign-in', _accountDate('lastLoginAt', 'Not available')),
             const SizedBox(height: 18),
             Text('App sessions last 30 days. Logging out ends this session right away.', style: Theme.of(context).textTheme.bodyMedium),
             const SizedBox(height: 18),
+            if (_account['isOwner'] == true || role == 'Owner') ...[
+              SizedBox(width: double.infinity, child: FilledButton.icon(onPressed: widget.onOpenAdmin, icon: const Icon(Icons.admin_panel_settings_outlined), label: const Text('Open Admin panel'))),
+              const SizedBox(height: 10),
+            ],
             OutlinedButton.icon(onPressed: _signOut, icon: const Icon(Icons.logout_rounded, size: 18), label: const Text('Log out')),
           ]),
         ),
     ]);
+  }
+
+  String _accountDate(String key, String fallback) {
+    final value = (_account[key] ?? '').toString().trim();
+    return '${value.isEmpty ? fallback : value} UTC';
   }
 
   Widget _row(String title, String value) => Padding(

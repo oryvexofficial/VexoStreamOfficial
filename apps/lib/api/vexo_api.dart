@@ -162,7 +162,7 @@ class VexoApi {
     }
     if (response.statusCode < 200 || response.statusCode >= 300) {
       final map = data is Map ? data : const <String, dynamic>{};
-      var message = (map['error'] ?? map['message'] ?? '').toString();
+      var message = (map['error'] ?? map['message'] ?? map['detail'] ?? '').toString();
       final code = (map['code'] ?? '').toString();
       maintenanceMode.value = response.statusCode == 503 && (code == 'maintenance' || message.toLowerCase().contains('maintenance'));
       if (message.isEmpty && rawBody.isNotEmpty && !rawBody.toLowerCase().contains('<html')) {

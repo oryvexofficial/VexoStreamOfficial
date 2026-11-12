@@ -238,36 +238,165 @@ async function handleAppApiV1(request, url, env, ctx) {
     if (path === '/account') {
         if (!getOnly()) return appApiJson({ error: 'Method not allowed.' }, 405, { Allow: 'GET, OPTIONS' });
         const admin = await appApiAdmin(request, env);
-        if (admin) return appApiJson({ account: { id: admin.username, username: admin.username, role: admin.owner ? 'Owner' : 'Admin', isOwner: !!admin.owner } });
+        if (admin) return appApiJson({ account: { id: admin.username, username: admin.username, role: admin.owner ? 'Owner' : 'Admin', isOwner: !!admin.owner, createdAt: admin.createdAt || '', lastLoginAt: admin.lastLogin || '' } });
         const member = await appApiMember(request, env);
         if (!member) return appApiJson({ error: 'Sign in to view your account.', code: 'auth_required' }, 401);
         return appApiJson({ account: { id: member.id, username: member.username, role: 'Member', isOwner: false, createdAt: member.created_at, lastLoginAt: member.last_login_at } });
     }
-    if (path === '/admin' || path === '/admin/settings') {
+    if (path.startsWith('/admin')) {
         const admin = await appApiAdmin(request, env);
         if (!admin || !admin.owner) return appApiJson({ error: 'Owner access is required.', code: 'owner_required' }, admin ? 403 : 401);
-        if (path === '/admin' && !getOnly()) return appApiJson({ error: 'Method not allowed.' }, 405, { Allow: 'GET, OPTIONS' });
-        if (path === '/admin/settings' && method !== 'POST') return appApiJson({ error: 'Method not allowed.' }, 405, { Allow: 'POST, OPTIONS' });
-        if (path === '/admin') {
+        if (path === '/admin' && method === 'GET') {
             const cfg = await getProviderConfig(env, true);
-            return appApiJson({ owner: { username: admin.username, role: 'Owner' }, maintenanceOn: await isMaintenanceOn(env, true), defaultProvider: cfg.defaultProvider, defaultQuery: cfg.defaultQuery, backendUrl: await getBackendUrl(env, true), providers: providerList(cfg).map(p => ({ id: p.id, name: p.name, mode: p.mode })) });
+            const membersConfig = await getMembersConfig(env, true);
+            const memberList = await listMembers(env, 100);
+            const socialCfg = await getSocialConfig(env, true);
+            const telegram = await getTelegramAdminSettings(env, url.origin, true);
+            const liveCfg = await getLiveConfig(env, true);
+            const team = await listAdminUsers(env);
+            const health = await dbHealth(env);
+            const liveStats = await liveAdminStats(env);
+            return appApiJson({
+                owner: { username: admin.username, role: 'Owner', isOwner: true, legacy: !!admin.legacy },
+                maintenanceOn: await isMaintenanceOn(env, true),
+                defaultProvider: cfg.defaultProvider, defaultQuery: cfg.defaultQuery, lockMessage: cfg.lockMessage,
+                providerOrder: cfg.order,
+                providers: providerList(cfg).map(p => ({ id: p.id, name: p.name, domain: p.domain, mode: p.mode })),
+                backendUrl: await getBackendUrl(env, true),
+                members: { config: membersConfig, total: memberList.total, rows: memberList.rows },
+                team: (team || []).map(t => ({ username: t.username, owner: !!t.owner, permissions: t.permissions, disabled: !!t.disabled, createdBy: t.createdBy, createdAt: t.createdAt, lastLogin: t.lastLogin, legacy: !!t.legacy })),
+                social: { config: socialCfg, posts: await listSocialPosts(env, 25) },
+                telegram,
+                live: { config: liveCfg, stats: liveStats },
+                database: health
+            });
         }
+        if (method !== 'POST') return appApiJson({ error: 'Method not allowed.' }, 405, { Allow: 'GET, POST, OPTIONS' });
         const body = await appApiReadJson(request);
         if (!body.ok) return appApiJson({ error: body.error }, 400);
         const values = body.value;
-        const cfg = await getProviderConfig(env, true);
-        if (Object.prototype.hasOwnProperty.call(values, 'defaultQuery')) cfg.defaultQuery = String(values.defaultQuery || '').trim().slice(0, 100);
-        if (Object.prototype.hasOwnProperty.call(values, 'defaultProvider')) cfg.defaultProvider = String(values.defaultProvider || '').trim().toLowerCase();
-        if (Object.prototype.hasOwnProperty.call(values, 'defaultQuery') || Object.prototype.hasOwnProperty.call(values, 'defaultProvider')) {
-            if (!(await saveProviderConfig(env, cfg))) return appApiJson({ error: 'Could not save provider settings.' }, 503);
+        if (path === '/admin/settings') {
+            const cfg = await getProviderConfig(env, true);
+            const nextCfg = { ...cfg };
+            if (Object.prototype.hasOwnProperty.call(values, 'defaultQuery')) nextCfg.defaultQuery = String(values.defaultQuery || '').trim().slice(0, 100);
+            if (Object.prototype.hasOwnProperty.call(values, 'defaultProvider')) nextCfg.defaultProvider = String(values.defaultProvider || '').trim().toLowerCase();
+            if (Object.prototype.hasOwnProperty.call(values, 'lockMessage')) nextCfg.lockMessage = String(values.lockMessage || '').trim().slice(0, 200);
+            if (Array.isArray(values.providerOrder)) nextCfg.order = values.providerOrder.map(String);
+            if (values.providerModes && typeof values.providerModes === 'object') nextCfg.modes = values.providerModes;
+            if (Object.keys(nextCfg).some(k => JSON.stringify(nextCfg[k]) !== JSON.stringify(cfg[k])) && !(await saveProviderConfig(env, nextCfg))) return appApiJson({ error: 'Could not save provider settings.' }, 503);
+            if (Object.prototype.hasOwnProperty.call(values, 'backendUrl')) {
+                const backend = await saveBackendUrl(env, String(values.backendUrl || ''));
+                if (!backend.ok) return appApiJson({ error: backend.error }, 400);
+            }
+            if (Object.prototype.hasOwnProperty.call(values, 'maintenanceOn') && !(await setMaintenance(env, values.maintenanceOn === true))) return appApiJson({ error: 'Could not save maintenance mode.' }, 503);
+            if (values.members && typeof values.members === 'object' && !(await saveMembersConfig(env, values.members))) return appApiJson({ error: 'Could not save member settings.' }, 503);
+            if (values.live && typeof values.live === 'object' && !(await saveLiveConfig(env, { ...(await getLiveConfig(env, true)), ...values.live }))) return appApiJson({ error: 'Could not save live viewer settings.' }, 503);
+            const updated = await getProviderConfig(env, true);
+            return appApiJson({ ok: true, maintenanceOn: await isMaintenanceOn(env, true), defaultProvider: updated.defaultProvider, defaultQuery: updated.defaultQuery, lockMessage: updated.lockMessage, providerOrder: updated.order, providers: providerList(updated).map(p => ({ id: p.id, name: p.name, mode: p.mode })), backendUrl: await getBackendUrl(env, true), members: await getMembersConfig(env, true), live: await getLiveConfig(env, true) });
         }
-        if (Object.prototype.hasOwnProperty.call(values, 'backendUrl')) {
-            const backend = await saveBackendUrl(env, String(values.backendUrl || ''));
-            if (!backend.ok) return appApiJson({ error: backend.error }, 400);
+        if (path === '/admin/team') {
+            const action = String(values.action || '');
+            let result;
+            const perms = Array.isArray(values.permissions) ? values.permissions.map(String) : [];
+            if (action === 'create') result = await createAdminAccount(env, admin, values.username, values.password, perms);
+            else if (action === 'update') result = await updateAdminPermissions(env, admin, values.username, perms);
+            else if (action === 'reset') result = await resetAdminPassword(env, admin, values.username, values.password);
+            else if (action === 'remove') result = await removeAdminAccount(env, admin, values.username);
+            else return appApiJson({ error: 'Unknown team action.' }, 400);
+            if (!result.ok) return appApiJson({ error: result.error }, 400);
+            return appApiJson({ ok: true, result, team: (await listAdminUsers(env) || []).map(t => ({ username: t.username, owner: !!t.owner, permissions: t.permissions, disabled: !!t.disabled, createdBy: t.createdBy, createdAt: t.createdAt, lastLogin: t.lastLogin, legacy: !!t.legacy })) });
         }
-        if (Object.prototype.hasOwnProperty.call(values, 'maintenanceOn') && !(await setMaintenance(env, values.maintenanceOn === true))) return appApiJson({ error: 'Could not save maintenance mode.' }, 503);
-        const updated = await getProviderConfig(env, true);
-        return appApiJson({ ok: true, maintenanceOn: await isMaintenanceOn(env, true), defaultProvider: updated.defaultProvider, defaultQuery: updated.defaultQuery, backendUrl: await getBackendUrl(env, true) });
+        if (path === '/admin/password') {
+            const result = await changeOwnPassword(env, admin, values.current, values.next, values.confirm);
+            if (!result.ok) return appApiJson({ error: result.error }, 400);
+            const oldToken = appApiBearer(request);
+            await env.DB.prepare('UPDATE admin_api_sessions SET revoked_at = CURRENT_TIMESTAMP WHERE token_hash = ? AND revoked_at IS NULL').bind(await sha256Hex(oldToken)).run().catch(() => null);
+            const issued = await appApiCreateAdminSession(result.user, env);
+            if (!issued) return appApiJson({ error: 'Password changed, but could not refresh this app session. Sign in again.' }, 503);
+            return appApiJson({ ok: true, token: issued.token, expiresAt: issued.expiresAt });
+        }
+        if (path === '/admin/members') {
+            const form = new FormData();
+            for (const [key, value] of Object.entries(values)) {
+                if (key === 'config' && value && typeof value === 'object') {
+                    form.set('action', 'settings');
+                    form.set('require_login', value.requireLogin ? '1' : '0');
+                    form.set('allow_signup', value.allowSignup ? '1' : '0');
+                    form.set('embeds_too', value.embedsToo ? '1' : '0');
+                    form.set('models_login', value.modelsLogin ? '1' : '0');
+                } else if (value !== null && value !== undefined) form.set(key, String(value));
+            }
+            const result = await handleMembersAdmin(env, form);
+            if (!result.ok) return appApiJson({ error: result.error }, 400);
+            const list = await listMembers(env, 100);
+            return appApiJson({ ok: true, result, members: { config: await getMembersConfig(env, true), total: list.total, rows: list.rows } });
+        }
+        if (path === '/admin/live') {
+            const cfg = await getLiveConfig(env, true);
+            const next = normalizeLiveConfig({ ...cfg, ...(values.config || values) });
+            if (!(await saveLiveConfig(env, next))) return appApiJson({ error: 'Could not save live viewer settings.' }, 503);
+            return appApiJson({ ok: true, config: await getLiveConfig(env, true), stats: await liveAdminStats(env) });
+        }
+        if (path === '/admin/social') {
+            const action = String(values.action || 'save');
+            const form = new FormData();
+            form.set('action', action);
+            const config = values.config && typeof values.config === 'object' ? values.config : values;
+            if (action === 'save') {
+                const links = config.links && typeof config.links === 'object' ? config.links : {};
+                for (const [key, value] of Object.entries(links)) form.set('link_' + key, String(value || ''));
+                form.set('show_page', config.showPage ? '1' : '0'); form.set('show_footer', config.showInFooter ? '1' : '0'); form.set('bot_buttons', config.botButtons ? '1' : '0');
+            } else if (action === 'channel') {
+                const channel = config.channel && typeof config.channel === 'object' ? config.channel : config;
+                form.set('channel_id', String(channel.chatId || '')); form.set('invite_url', String(channel.inviteUrl || ''));
+            } else if (action === 'bots') {
+                const bots = Array.isArray(config.bots) ? config.bots : [];
+                for (const bot of bots) {
+                    const key = String(bot.key || 'new');
+                    form.append('bot_key', key); form.append('bot_platform', String(bot.platform || 'other')); form.append('bot_name', String(bot.name || ''));
+                    form.append('bot_id', String(bot.botId || '')); form.append('bot_url', String(bot.url || '')); form.append('bot_about', String(bot.about || ''));
+                    form.set('bot_show_' + key, bot.visible === false ? '0' : '1');
+                }
+            }
+            for (const key of ['text', 'format', 'button_text', 'button_url', 'post_id']) if (values[key] !== undefined) form.set(key, String(values[key]));
+            for (const key of ['silent', 'pin', 'no_preview']) if (values[key] !== undefined) form.set(key, values[key] === true || values[key] === '1' ? '1' : '');
+            const result = await handleSocialAction(env, url.origin, admin, form);
+            if (!result.ok) return appApiJson({ error: result.error }, 400);
+            return appApiJson({ ok: true, result, social: { config: await getSocialConfig(env, true), posts: await listSocialPosts(env, 25) } });
+        }
+        if (path === '/admin/telegram') {
+            const action = String(values.action || 'save');
+            let result;
+            if (action === 'save') result = await saveTelegramSettings(env, values.botToken, values.webhookOrigin);
+            else if (action === 'reset_token') result = await resetTelegramTokenOverride(env);
+            else if (action === 'reconnect') {
+                const data = await setupTelegramWebhook(url.origin, env).catch(e => ({ ok: false, description: String(e && e.message) }));
+                result = data && data.ok ? { ok: true, message: 'Telegram webhook connected.' } : { ok: false, error: 'Telegram setup failed: ' + ((data && data.description) || 'unknown error') };
+            } else if (action === 'check_bot') result = await checkTelegramBot(env, url.origin);
+            else if (action === 'check_channel') result = await testTelegramChannel(env, url.origin, await getSocialConfig(env, true));
+            else return appApiJson({ error: 'Unknown Telegram action.' }, 400);
+            if (!result.ok) return appApiJson({ error: result.error }, 400);
+            return appApiJson({ ok: true, result, telegram: await getTelegramAdminSettings(env, url.origin, true) });
+        }
+        if (path === '/admin/operations') {
+            const action = String(values.action || 'health');
+            let health = await dbHealth(env);
+            if (action === 'repair') {
+                __usersReady = false;
+                __membersReady = false;
+                __appApiSessionsReady = false;
+                __adminApiSessionsReady = false;
+                const settingsOk = await ensureSettingsSchema(env, true);
+                const adminsOk = await ensureAdminUsersSchema(env);
+                const membersOk = await ensureMembersSchema(env);
+                const sessionsOk = await ensureAppApiSessionsSchema(env);
+                const adminSessionsOk = await ensureAdminApiSessionsSchema(env);
+                const writeOk = settingsOk && await dbSetSetting(env, 'last_healthcheck', new Date().toISOString());
+                health = { ...(await dbHealth(env)), binding: !!env.DB, table: settingsOk, write: !!writeOk, admins: adminsOk, members: membersOk, sessions: sessionsOk, adminSessions: adminSessionsOk, error: __dbError };
+            } else if (action !== 'health') return appApiJson({ error: 'Unknown operations action.' }, 400);
+            return appApiJson({ ok: !!(health.binding && health.table && health.write), database: health });
+        }
+        return appApiJson({ error: 'Unknown admin endpoint.' }, 404);
     }
     if (path === '/catalog' || path === '/search') {
         if (!getOnly()) return appApiJson({ error: 'Method not allowed.' }, 405, { Allow: 'GET, OPTIONS' });
@@ -286,8 +415,9 @@ async function handleAppApiV1(request, url, env, ctx) {
         const config = await getMembersConfig(env);
         if (config.modelsLogin && !(await appApiMember(request, env)) && !(await appApiAdmin(request, env))) return appApiJson({ error: 'Sign in to browse performer profiles.', code: 'auth_required' }, 401);
         if (path === '/models') {
-            const gender = String(url.searchParams.get('gender') || 'women').toLowerCase();
-            if (!['women', 'both', 'men'].includes(gender)) return appApiJson({ error: 'Invalid gender filter.' }, 400);
+            const requestedGender = String(url.searchParams.get('gender') || 'women').trim().toLowerCase();
+            const gender = ({ women: 'Female', both: 'Female,Male', men: 'Male' })[requestedGender] || String(url.searchParams.get('gender') || 'Female').trim();
+            if (!['Female', 'Male', 'Female,Male'].includes(gender)) return appApiJson({ error: 'Invalid gender filter.' }, 400);
             const params = {
                 gender,
                 sort: 'popularity',

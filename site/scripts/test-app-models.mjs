@@ -43,10 +43,34 @@ test('app Models request forwards the same Core query the web directory uses', a
     assert.deepEqual(await response.json(), { models: [{ name: 'Example model', image_url: 'https://img.example.test/model.jpg' }], has_more: false });
     assert.equal(backendUrl.origin, 'https://core.example.test');
     assert.equal(backendUrl.pathname, '/api/models');
-    assert.equal(backendUrl.searchParams.get('gender'), 'women');
+    assert.equal(backendUrl.searchParams.get('gender'), 'Female');
     assert.equal(backendUrl.searchParams.get('sort'), 'popularity');
     assert.equal(backendUrl.searchParams.get('page'), '1');
     assert.equal(backendUrl.searchParams.has('search'), false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+
+test('app women/both/men filters map to the Core API gender values', async () => {
+  const originalFetch = globalThis.fetch;
+  const received = [];
+  globalThis.fetch = async (input) => {
+    received.push(new URL(typeof input === 'string' ? input : input.url).searchParams.get('gender'));
+    return new Response(JSON.stringify({ models: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  };
+  try {
+    for (const filter of ['women', 'both', 'men']) {
+      const response = await worker.fetch(new Request(`https://api.vexostream.bond/api/v1/models?gender=${filter}`, {
+        headers: { 'User-Agent': 'VexoStream-Windows/1.1', 'Accept-Language': 'en-US', 'X-App-Key': appKey }
+      }), {
+        STREAM_SIGN_SECRET: 'test-app-models-secret', EDGE_TOKEN: 'test-app-models-edge', APP_KEY: appKey,
+        RAILWAY_URL: 'https://core.example.test', DB: db
+      }, { waitUntil() {} });
+      assert.equal(response.status, 200);
+    }
+    assert.deepEqual(received, ['Female', 'Female,Male', 'Male']);
   } finally {
     globalThis.fetch = originalFetch;
   }

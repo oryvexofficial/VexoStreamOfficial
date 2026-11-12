@@ -105,7 +105,11 @@ test('Owner can sign into the app during maintenance and open native admin setti
 
   const account = await call('/account', { token: loginData.token });
   assert.equal(account.status, 200);
-  assert.equal((await account.json()).account.role, 'Owner');
+  const accountData = (await account.json()).account;
+  assert.equal(accountData.role, 'Owner');
+  assert.equal(accountData.isOwner, true);
+  assert.equal(accountData.createdAt, '2026-11-12');
+  assert.equal(accountData.lastLoginAt, '2026-11-12');
 });
 
 test('incorrect app key gets an explicit key error instead of a network diagnosis', async () => {

@@ -188,6 +188,7 @@ async function authenticateAdmin(env, username, password) {
             const given = await hashAdminPassword(password, row.salt, row.iterations);
             if (!timingSafeEqual(given, row.hash)) return null;
             try { await env.DB.prepare('UPDATE admin_users SET last_login = CURRENT_TIMESTAMP WHERE username = ? COLLATE NOCASE').bind(row.username).run(); } catch (_) {}
+            forgetAdminCache(row.username);
             return row;
         }
     }
