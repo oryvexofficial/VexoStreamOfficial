@@ -27,6 +27,28 @@ function targetFromQuery(url) {
     return null;
 }
 
+async function appAdminEmbedMaintenanceGrant(request, url) {
+    let target = '';
+    let grant = '';
+    if (url.pathname === '/api/extract') {
+        target = url.searchParams.get('url') || '';
+        grant = request.headers.get('X-Vexo-Embed-Grant') || '';
+        let referer;
+        try { referer = new URL(request.headers.get('Referer') || ''); } catch (_) { return false; }
+        if (referer.origin !== url.origin) return false;
+        const refererParts = referer.pathname.split('/');
+        if (refererParts.length !== 3 || refererParts[1] !== 'embed') return false;
+        const refererTarget = decodeVideoParam(refererParts[2]);
+        if (!refererTarget || canonicalMediaTarget(refererTarget) !== canonicalMediaTarget(target)) return false;
+    } else {
+        const parts = url.pathname.split('/');
+        if (parts.length !== 3 || parts[1] !== 'embed') return false;
+        target = decodeVideoParam(parts[2]) || '';
+        grant = url.searchParams.get('app_grant') || '';
+    }
+    return !!target && await verifyAppEmbedGrant(target, grant, { adminOnly: true });
+}
+
 async function socialPreview(targetUrl) {
     // Only for link-preview bots: fetch title + thumbnail so cards look right
     try {
@@ -297,7 +319,8 @@ async function handleRequest(request, env, ctx) {
             if (await isMaintenanceOn(env)) {
                 const appLoginAllowed = path === APP_API_PREFIX + '/auth/login';
                 const appOwner = path.startsWith(APP_API_PREFIX + '/') ? await appApiAdmin(request, env) : null;
-                if (!appLoginAllowed && !(await verifyAdminSession(request, env)) && !appOwner) {
+                const appAdminEmbedAllowed = await appAdminEmbedMaintenanceGrant(request, url);
+                if (!appLoginAllowed && !(await verifyAdminSession(request, env)) && !appOwner && !appAdminEmbedAllowed) {
                     if (path.startsWith('/api/')) return appApiJson({ status: 'error', error: 'VexoStream is under maintenance. Try again soon.', code: 'maintenance' }, 503, { 'Retry-After': '3600' });
                     return htmlResponse(renderMaintenanceHtml(), 503, { ...SECURE_HTML_HEADERS, 'Retry-After': '3600', 'Cache-Control': 'no-store' });
                 }

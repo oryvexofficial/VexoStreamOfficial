@@ -238,24 +238,28 @@ function canonicalMediaTarget(raw) {
     } catch (_) { return ''; }
 }
 
-async function createAppEmbedGrant(videoTarget) {
+async function createAppEmbedGrant(videoTarget, { admin = false } = {}) {
     const target = canonicalMediaTarget(videoTarget);
     if (!target) throw new Error('Cannot authorize an invalid video URL.');
     const expires = Math.floor(Date.now() / 1000) + APP_EMBED_GRANT_TTL_SECONDS;
-    const signature = await generateHmacSha256('app-embed-v1:' + expires + ':' + target, STREAM_SIGN_SECRET);
-    return { value: expires + '.' + signature, expiresAt: expires };
+    const purpose = admin ? 'app-embed-admin-v1:' : 'app-embed-v1:';
+    const signature = await generateHmacSha256(purpose + expires + ':' + target, STREAM_SIGN_SECRET);
+    return { value: expires + (admin ? '.admin.' : '.') + signature, expiresAt: expires };
 }
 
-async function verifyAppEmbedGrant(videoTarget, value) {
-    const match = /^(\d{9,11})\.([a-f0-9]{64})$/i.exec(String(value || ''));
+async function verifyAppEmbedGrant(videoTarget, value, { adminOnly = false } = {}) {
+    const match = /^(\d{9,11})(?:\.(admin))?\.([a-f0-9]{64})$/i.exec(String(value || ''));
     if (!match) return false;
     const expires = Number(match[1]);
     const now = Math.floor(Date.now() / 1000);
     if (!Number.isSafeInteger(expires) || expires < now || expires > now + APP_EMBED_GRANT_TTL_SECONDS + 30) return false;
+    const isAdminGrant = String(match[2] || '').toLowerCase() === 'admin';
+    if (adminOnly && !isAdminGrant) return false;
     const target = canonicalMediaTarget(videoTarget);
     if (!target) return false;
-    const expected = await generateHmacSha256('app-embed-v1:' + expires + ':' + target, STREAM_SIGN_SECRET);
-    return timingSafeEqual(expected, match[2]);
+    const purpose = isAdminGrant ? 'app-embed-admin-v1:' : 'app-embed-v1:';
+    const expected = await generateHmacSha256(purpose + expires + ':' + target, STREAM_SIGN_SECRET);
+    return timingSafeEqual(expected, match[3]);
 }
 
 async function createSignedMediaToken(clientIp, mediaTarget = '', options = {}) {

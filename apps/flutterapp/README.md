@@ -1,6 +1,6 @@
 # VexoStream Flutter app
 
-Flutter source for Windows and Android. The app version is `1.0.1` (`1.0.1+3` in `pubspec.yaml`).
+Flutter source for Windows and Android. The app version is `1.0.1` (`1.0.1+4` in `pubspec.yaml`).
 
 ## App features
 

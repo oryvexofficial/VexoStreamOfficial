@@ -458,7 +458,7 @@ async function handleAppApiV1(request, url, env, ctx) {
         const cfg = await getProviderConfig(env, true);
         if (isProviderHidden(cfg, provider)) return hiddenJson(provider);
         if (isProviderLocked(cfg, provider)) return lockedJson(cfg, provider);
-        const issued = await createAppEmbedGrant(target);
+        const issued = await createAppEmbedGrant(target, { admin: !!admin });
         return appApiJson({ grant: issued.value, expiresAt: issued.expiresAt });
     }
     if (path === '/videos/extract') {

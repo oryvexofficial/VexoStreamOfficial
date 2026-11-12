@@ -131,6 +131,62 @@ test('ordinary members cannot sign in while maintenance mode is active', async (
   assert.equal(payload.code, 'maintenance');
 });
 
+test('owner app embed and stream extraction continue working during maintenance', async () => {
+  const videoUrl = 'https://www.pornhub.com/view_video.php?viewkey=ph123456';
+  const grantResponse = await call('/embed/grant', {
+    method: 'POST',
+    token: ownerToken,
+    body: { url: videoUrl }
+  });
+  assert.equal(grantResponse.status, 200, await grantResponse.clone().text());
+  const grant = (await grantResponse.json()).grant;
+  assert.match(grant, /^\d{10}\.admin\.[a-f0-9]{64}$/);
+
+  const encodedVideo = Buffer.from(videoUrl).toString('base64url');
+  const embedUrl = new URL(`https://vexostream.bond/embed/${encodedVideo}`);
+  embedUrl.searchParams.set('app_grant', grant);
+  embedUrl.searchParams.set('app_player', '1');
+  const pageHeaders = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36',
+    'Accept-Language': headers['Accept-Language'],
+    'CF-Connecting-IP': '203.0.113.91'
+  };
+  const page = await worker.fetch(new Request(embedUrl, { headers: pageHeaders }), env, ctx);
+  assert.equal(page.status, 200);
+  const html = await page.text();
+  assert.match(html, /id="vxVideo"/);
+  assert.doesNotMatch(html, /We&rsquo;ll be right back\./);
+  const config = html.match(/window\.VX=(\{.*?\});window\.API_TOKEN/s);
+  assert.ok(config, 'embedded player contains its browser session config');
+  const browserToken = JSON.parse(config[1]).token;
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    status: 'success',
+    title: 'Maintenance embed test',
+    streams: {
+      qualities: [{ quality: '480p', type: 'mp4', url: 'https://cdn.example.test/video.mp4' }],
+      fallback: []
+    }
+  }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  try {
+    const extractUrl = new URL('https://vexostream.bond/api/extract');
+    extractUrl.searchParams.set('url', videoUrl);
+    extractUrl.searchParams.set('token', browserToken);
+    const extraction = await worker.fetch(new Request(extractUrl, {
+      headers: {
+        ...pageHeaders,
+        'X-Edge-Token': browserToken,
+        'X-Vexo-Embed-Grant': grant,
+        Referer: `https://vexostream.bond/embed/${encodedVideo}`
+      }
+    }), env, ctx);
+    assert.equal(extraction.status, 200, await extraction.clone().text());
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 function seedAdmin(username, permissions, tokenChar) {
   const token = tokenChar.repeat(64);
   const stamp = `stamp-${username}`;
