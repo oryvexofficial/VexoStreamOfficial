@@ -77,15 +77,34 @@ test('watch page keeps a fluid player and compact controls on phone widths', asy
   assert.ok(css.includes('@media (max-width:359px)'));
 });
 
-test('app player skips the loading poster without changing standard embeds', async () => {
+test('app_player compatibility query keeps the first-frame poster and shared poster loader', async () => {
   const target = 'https://www.xvideos.com/video123456/example';
   const response = await worker.fetch(new Request(pageUrl('embed', target) + '?app_player=1', {
     headers: browserHeaders
   }), env, ctx);
   assert.equal(response.status, 200);
   const html = await response.text();
-  assert.ok(!html.includes('id="vxPoster"'), 'app embeds do not render a poster');
-  assert.match(html, /"noPoster":true/);
+  assert.ok(html.includes('id="vxPoster"'), 'app embeds render the poster surface');
+  assert.match(html, /"noPoster":false/);
+  assert.match(html, /function resolvePosterFromSite/);
+});
+
+test('app-specific embed route paints the supplied listing thumbnail before player startup', async () => {
+  const target = 'https://www.xvideos.com/video123456/example';
+  const thumbnail = 'https://thumb.xvideos-cdn.com/video-thumb.jpg';
+  const response = await worker.fetch(new Request(
+    pageUrl('embed/for/app', target) + '?app_thumb=' + encodeURIComponent(thumbnail),
+    { headers: browserHeaders }
+  ), env, ctx);
+  assert.equal(response.status, 200);
+  const html = await response.text();
+  assert.ok(html.includes('class="embed app-embed"'));
+  assert.ok(html.includes('id="vxPoster"'));
+  assert.ok(html.includes('/proxy-image?url=https%3A%2F%2Fthumb.xvideos-cdn.com%2Fvideo-thumb.jpg'));
+  assert.match(html, /"appMode":true/);
+  assert.match(html, /searchParams\.delete\("app_thumb"\)/);
+  const css = await readFile(new URL('../src/styles/app.css', import.meta.url), 'utf8');
+  assert.ok(css.includes('html.app-embed #vxFs{display:none}'));
 });
 
 test('catalog pages render cards that load listing thumbnails immediately with a branded fallback', async () => {

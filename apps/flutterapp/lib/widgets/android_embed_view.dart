@@ -45,6 +45,14 @@ class AndroidEmbedViewState extends State<AndroidEmbedView> {
           }
           return NavigationDecision.prevent;
         },
+        onWebResourceError: (error) {
+          if (error.isForMainFrame != true || !mounted) return;
+          _poll?.cancel();
+          setState(() {
+            _error = 'The player page could not connect. Check your connection, then try again.';
+            _ready = false;
+          });
+        },
         onPageFinished: (_) {
           _poll?.cancel();
           unawaited(_readQuality());
@@ -58,10 +66,11 @@ class AndroidEmbedViewState extends State<AndroidEmbedView> {
     try {
       final resumeAt = int.tryParse(widget.video['resumeAt']?.toString() ?? '') ?? 0;
       final playerParams = <String, String>{
-        'app_player': '1',
+        if (videoThumbnail(widget.video).isNotEmpty)
+          'app_thumb': videoThumbnail(widget.video),
         if (resumeAt > 0) 'app_resume': '$resumeAt',
       };
-      var target = widget.embed.embedUri.replace(queryParameters: playerParams);
+      var target = widget.embed.appEmbedUri.replace(queryParameters: playerParams);
       if (!isAllowedProviderEmbedNavigation(target.toString())) throw const ApiException('Unsupported embed link.');
       if (widget.api.hasToken) {
         final result = asMap(await widget.api.post('/embed/grant', body: {'url': widget.embed.sourceUri.toString()}, authenticated: true));
@@ -71,6 +80,17 @@ class AndroidEmbedViewState extends State<AndroidEmbedView> {
           ...playerParams,
           'app_grant': grant,
         });
+        if (!playerParams.containsKey('app_thumb')) {
+          final poster = (await widget.api.posters([
+            widget.embed.sourceUri.toString(),
+          ]))[widget.embed.sourceUri.toString()];
+          if (poster != null && poster.isNotEmpty) {
+            target = target.replace(queryParameters: {
+              ...target.queryParameters,
+              'app_thumb': poster,
+            });
+          }
+        }
       }
       if (!mounted) return;
       setState(() { _ready = true; _error = null; _needsSignIn = false; });
@@ -88,13 +108,10 @@ class AndroidEmbedViewState extends State<AndroidEmbedView> {
     try {
       final result = await _controller.runJavaScriptReturningResult(r'''
         (function () {
-          if (!document.getElementById('vexo-app-no-poster')) {
-            var style = document.createElement('style');
-            style.id = 'vexo-app-no-poster';
-            style.textContent = '#vxPoster { display: none !important; background-image: none !important; }';
-            document.head.appendChild(style);
-          }
           var p = window.VXPlayer;
+          if (!p) return null;
+          var metadata = typeof p.metadata === 'function' ? p.metadata() : {};
+          var queue = typeof p.queue === 'function' ? p.queue() || [] : [];
           var appVideo = document.getElementById('vxVideo');
           var resumeAt = Number(new URLSearchParams(location.search).get('app_resume'));
           if (resumeAt > 0 && !window.__vexoAppResumeApplied && appVideo &&
@@ -103,9 +120,12 @@ class AndroidEmbedViewState extends State<AndroidEmbedView> {
             appVideo.currentTime = resumeAt;
             window.__vexoAppResumeApplied = true;
           }
-          if (!p || typeof p.queue !== 'function') return null;
-          return JSON.stringify({auto: !!p.isAuto(), current: p.current(),
-            qualities: (p.queue() || []).map(function(item, index) {
+          return JSON.stringify({auto: typeof p.isAuto === 'function' ? !!p.isAuto() : true,
+            current: typeof p.current === 'function' ? p.current() : -1,
+            title: String(metadata.title || ''),
+            provider: String(metadata.provider || ''),
+            thumbnail: String(metadata.thumbnail || ''),
+            qualities: queue.map(function(item, index) {
               return {index: index, label: String(item.label || ''),
                 format: item.isHls ? 'HLS' : 'MP4', visible: item.visible !== false};
             })});
@@ -120,7 +140,7 @@ class AndroidEmbedViewState extends State<AndroidEmbedView> {
       }
       final state = EmbeddedQualityState.parseScriptResult(value);
       if (!mounted || state == null) return;
-      final signature = '${state.isAuto}:${state.currentIndex}:${state.options.map((q) => '${q.index}:${q.label}:${q.format}').join('|')}';
+      final signature = '${state.isAuto}:${state.currentIndex}:${state.title}:${state.provider}:${state.thumbnail}:${state.options.map((q) => '${q.index}:${q.label}:${q.format}').join('|')}';
       if (signature != _signature) {
         _signature = signature;
         widget.onQualityStateChanged(state);

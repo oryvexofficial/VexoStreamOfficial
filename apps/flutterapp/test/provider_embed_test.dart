@@ -45,6 +45,7 @@ void main() {
         );
         expect(resolvedEmbed.embedUri.host, 'vexostream.bond', reason: source);
         expect(resolvedEmbed.embedUri.path, startsWith('/embed/'), reason: source);
+        expect(resolvedEmbed.appEmbedUri.path, startsWith('/embed/for/app/'), reason: source);
         final encoded = resolvedEmbed.embedUri.pathSegments.last;
         final decoded = utf8.decode(base64Url.decode(base64Url.normalize(encoded)));
         expect(decoded, source, reason: source);
@@ -88,6 +89,12 @@ void main() {
         ),
         isTrue,
       );
+      expect(
+        isAllowedProviderEmbedNavigation(
+          'https://vexostream.bond/embed/for/app/YWJjMTIz',
+        ),
+        isTrue,
+      );
     });
 
     test('blocks provider URLs, arbitrary domains, and non-embed routes', () {
@@ -97,6 +104,8 @@ void main() {
         'https://attacker.example@vexostream.bond/embed/YWJjMTIz',
         'https://vexostream.bond/video/YWJjMTIz',
         'https://vexostream.bond:8443/embed/YWJjMTIz',
+        'https://vexostream.bond/embed/for/other/YWJjMTIz',
+        'https://vexostream.bond/embed/for/app',
         'https://www.pornhub.com/embed/abc12345',
       ]) {
         expect(isAllowedProviderEmbedNavigation(url), isFalse, reason: url);
@@ -109,6 +118,9 @@ void main() {
       final state = EmbeddedQualityState.parseScriptResult(jsonEncode({
         'auto': false,
         'current': 1,
+        'title': 'A real provider title',
+        'provider': 'pornhub',
+        'thumbnail': 'https://thumb.example.test/video.jpg',
         'qualities': [
           {'index': 0, 'label': '1080p', 'format': 'HLS', 'visible': true},
           {'index': 1, 'label': '720p', 'format': 'MP4', 'visible': true},
@@ -120,6 +132,9 @@ void main() {
       expect(state!.isAuto, isFalse);
       expect(state.currentIndex, 1);
       expect(state.currentLabel, '720p');
+      expect(state.title, 'A real provider title');
+      expect(state.provider, 'pornhub');
+      expect(state.thumbnail, 'https://thumb.example.test/video.jpg');
       expect(state.options.map((quality) => quality.label), ['1080p', '720p']);
       expect(state.options.map((quality) => quality.format), ['HLS', 'MP4']);
     });

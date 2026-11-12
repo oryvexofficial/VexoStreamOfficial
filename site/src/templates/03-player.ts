@@ -300,11 +300,13 @@ function renderWatchHtml(targetUrl, meta, initial = {}) {
         '</body></html>';
 }
 
-function renderEmbedHtml(targetUrl, meta, thumb = '', appGrant = '', noPoster = false) {
+function renderEmbedHtml(targetUrl, meta, thumb = '', appGrant = '', appMode = false) {
     const stripAppGrant = appGrant
-        ? '<script>try{var u=new URL(location.href);u.searchParams.delete("app_grant");history.replaceState(null,"",u.pathname+u.search+u.hash)}catch(e){}</script>'
-        : '';
-    return '<!DOCTYPE html><html lang="en" class="embed" data-theme="dark"><head>' +
+        ? '<script>try{var u=new URL(location.href);u.searchParams.delete("app_grant");u.searchParams.delete("app_thumb");history.replaceState(null,"",u.pathname+u.search+u.hash)}catch(e){}</script>'
+        : appMode
+            ? '<script>try{var u=new URL(location.href);u.searchParams.delete("app_thumb");history.replaceState(null,"",u.pathname+u.search+u.hash)}catch(e){}</script>'
+            : '';
+    return '<!DOCTYPE html><html lang="en" class="embed' + (appMode ? ' app-embed' : '') + '" data-theme="dark"><head>' +
         '<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">' +
         '<meta name="robots" content="noindex">' +
         stripAppGrant +
@@ -314,8 +316,8 @@ function renderEmbedHtml(targetUrl, meta, thumb = '', appGrant = '', noPoster = 
         '<script>' + DIRECTION_BOOT + '</script>' +
         '<style>' + APP_CSS + '</style>' + HLS_SCRIPT +
         '</head><body>' +
-        renderPlayerMarkup('embed', thumb, noPoster) +
-        clientConfigScript({ player: { mode: 'embed', targetUrl, thumb: noPoster ? '' : thumb, appGrant, noPoster, hlsFallback: HLS_FALLBACK_SRC } }) +
+        renderPlayerMarkup('embed', thumb) +
+        clientConfigScript({ player: { mode: 'embed', targetUrl, thumb, appGrant, appMode, noPoster: false, hlsFallback: HLS_FALLBACK_SRC } }) +
         '<script>' + PLAYER_JS + '</script>' +
         '</body></html>';
 }
@@ -366,6 +368,7 @@ const PLAYER_JS = String.raw`
     queue: function(){ return queue; },
     current: function(){ return idx; },
     isAuto: function(){ return autoQ; },
+    metadata: function(){ return { title: title, provider: provider, thumbnail: thumbRaw }; },
     select: function(i){ choose(i); },
     auto: function(){ chooseAuto(); },
     refresh: function(){ refresh('manual'); },
@@ -1210,7 +1213,9 @@ const PLAYER_JS = String.raw`
   function resolvePosterFromSite(){
     if (!cfg.targetUrl || cfg.noPoster) return;
     var url = '/api/posters?u=' + encodeURIComponent(cfg.targetUrl) + '&token=' + encodeURIComponent(TOKEN);
-    fetch(url, { headers: { 'X-Edge-Token': TOKEN }, cache: 'no-store' })
+    var headers = { 'X-Edge-Token': TOKEN };
+    if (cfg.appGrant) headers['X-Vexo-Embed-Grant'] = cfg.appGrant;
+    fetch(url, { headers: headers, cache: 'no-store' })
       .then(function(r){ return r.ok ? r.json() : null; })
       .then(function(data){
         if (!data) return;
@@ -1238,6 +1243,7 @@ const PLAYER_JS = String.raw`
       if (!data) { fail(lockedMsg || 'The source didn\u2019t return any streams. Check that the video is public.'); emit('meta', null); return; }
       if (data.duration) { apiDuration = parseDur(data.duration); renderTime(); }
       title = data.title || ''; provider = String(data.provider || '');
+      if (title) document.title = title + ' \u2014 VexoStream';
       var extractedThumbs = thumbnailCandidates(data);
       if (!thumbRaw && extractedThumbs.length) thumbRaw = extractedThumbs[0];
       setPoster(extractedThumbs, 1);

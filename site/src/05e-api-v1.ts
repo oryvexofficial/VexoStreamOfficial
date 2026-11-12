@@ -168,7 +168,7 @@ async function handleAppApiV1(request, url, env, ctx) {
         const members = await getMembersConfig(env, true);
         const providers = listedProviders(cfg).map(p => ({ id: p.id, name: p.name, domain: p.domain, status: p.mode, browse: p.mode === 'live', playback: p.mode === 'live', available: p.mode === 'live' }));
         return appApiJson({
-            app: { name: 'VexoStream', adultOnly: true, version: '1.0.1' },
+            app: { name: 'VexoStream', adultOnly: true, version: '1.0.2' },
             apiVersion: 1,
             providers,
             defaultProvider: defaultProviderOf(cfg),

@@ -65,7 +65,7 @@ class ReleaseUpdateChecker {
   static const configuredRepository =
       String.fromEnvironment('VEXOSTREAM_GITHUB_REPOSITORY');
   static const appVersion =
-      String.fromEnvironment('APP_VERSION', defaultValue: '1.0.1');
+      String.fromEnvironment('APP_VERSION', defaultValue: '1.0.2');
 
   final http.Client _client;
   final String repository;

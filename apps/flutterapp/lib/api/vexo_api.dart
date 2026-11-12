@@ -44,7 +44,7 @@ class VexoApi {
   static const _override = String.fromEnvironment('VEXOSTREAM_API_BASE');
   static const appKey = String.fromEnvironment('APP_KEY');
   static const appVersion =
-      String.fromEnvironment('APP_VERSION', defaultValue: '1.0.1');
+      String.fromEnvironment('APP_VERSION', defaultValue: '1.0.2');
   static const primaryBase = 'https://api.vexostream.bond/api/v1';
   static const fallbackBase = 'https://vexostream.bond/api/v1';
   static String get userAgent => Platform.isAndroid
@@ -319,20 +319,54 @@ String firstText(Map<String, dynamic> map, List<String> keys, {String fallback =
 
 /// Thumbnail aliases returned by the different catalogue backends.
 String videoThumbnail(Map<String, dynamic> item) {
-  final direct = firstText(item, const [
+  const aliases = [
     'thumbnail', 'thumbnail_url', 'thumb', 'thumb_url', 'poster', 'poster_url',
     'image', 'image_url', 'preview', 'preview_url', 'cover', 'cover_url',
-    'default_thumb', 'medialist', 'thumb_image', 'flv_thumbnail'
-  ]);
-  if (direct.isNotEmpty) return direct;
-  for (final key in const ['images', 'photos', 'thumbnails']) {
-    final values = asList(item[key]);
-    if (values.isEmpty) continue;
-    final first = values.first;
-    final url = first is Map ? firstText(asMap(first), const ['url', 'image_url', 'src']) : first.toString().trim();
-    if (url.isNotEmpty) return url;
+    'default_thumb', 'medialist', 'thumb_image', 'flv_thumbnail',
+    'images', 'photos', 'thumbnails', 'thumbs',
+  ];
+  for (final key in aliases) {
+    final value = _thumbnailCandidate(item[key]);
+    if (value.isNotEmpty) return value;
   }
   return '';
+}
+
+String _thumbnailCandidate(dynamic value, [int depth = 0]) {
+  if (depth > 3 || value == null) return '';
+  if (value is Iterable) {
+    for (final item in value.take(12)) {
+      final candidate = _thumbnailCandidate(item, depth + 1);
+      if (candidate.isNotEmpty) return candidate;
+    }
+    return '';
+  }
+  if (value is Map) {
+    for (final key in const [
+      'url', 'src', 'image', 'image_url', 'thumbnail', 'thumbnail_url',
+      'thumb', 'thumb_url', 'poster', 'poster_url', 'default_thumb',
+      'cover_image', 'preview_image',
+    ]) {
+      final candidate = _thumbnailCandidate(value[key], depth + 1);
+      if (candidate.isNotEmpty) return candidate;
+    }
+    return '';
+  }
+  var raw = value.toString().trim();
+  if (raw.isEmpty || raw.length > 2048 ||
+      RegExp(r'(?:blank|placeholder|default)\.gif(?:[?#]|$)', caseSensitive: false).hasMatch(raw)) {
+    return '';
+  }
+  if (raw.startsWith('//')) raw = 'https:$raw';
+  final uri = Uri.tryParse(raw);
+  if (uri == null ||
+      (uri.scheme != 'http' && uri.scheme != 'https') ||
+      uri.host.isEmpty ||
+      uri.userInfo.isNotEmpty ||
+      RegExp(r'\.(?:mp4|m3u8|webm|m4s|ts)(?:$|[?#])', caseSensitive: false).hasMatch(uri.path)) {
+    return '';
+  }
+  return uri.toString();
 }
 
 /// Catalogue responses are either a bare list or wrapped in a map.

@@ -1,6 +1,6 @@
 # VexoStream Flutter app
 
-Flutter source for Windows and Android. The app version is `1.0.1` (`1.0.1+4` in `pubspec.yaml`).
+Flutter source for Windows and Android. The app version is `1.0.2` (`1.0.2+7` in `pubspec.yaml`).
 
 ## App features
 
@@ -23,7 +23,7 @@ Windows:
 ```powershell
 flutter create --platforms=windows --project-name=vexostream_app --org=bond.vexostream .
 flutter build windows --release `
-  --dart-define=APP_VERSION=1.0.1 `
+  --dart-define=APP_VERSION=1.0.2 `
   --dart-define=VEXOSTREAM_GITHUB_REPOSITORY=OWNER/REPOSITORY `
   --dart-define=APP_KEY=YOUR_WORKER_APP_KEY
 ```
@@ -33,7 +33,7 @@ Android universal APK:
 ```sh
 bash tool/prepare_android.sh
 flutter build apk --release \
-  --dart-define=APP_VERSION=1.0.1 \
+  --dart-define=APP_VERSION=1.0.2 \
   --dart-define=VEXOSTREAM_GITHUB_REPOSITORY=OWNER/REPOSITORY \
   --dart-define=APP_KEY=YOUR_WORKER_APP_KEY
 ```
@@ -48,7 +48,7 @@ For an API-ready build, provide the same `APP_KEY` configured as a Cloudflare Wo
 
 ## GitHub releases and mandatory updates
 
-Every `v*` tag runs the website tests, Flutter tests, Windows build, Android universal APK build, and NSIS packaging. A version-matching tag such as `v1.0.1` publishes the Windows installer, portable ZIP, and Android APK as release assets. Releases without `APP_KEY` are clearly marked validation-only and published as pre-releases, so they do not become the stable update target.
+Every `v*` tag runs the website tests, Flutter tests, Windows build, Android universal APK build, and NSIS packaging. A version-matching tag such as `v1.0.2` publishes the Windows installer, portable ZIP, and Android APK as release assets. Releases without `APP_KEY` are clearly marked validation-only and published as pre-releases, so they do not become the stable update target.
 
 CI passes `GITHUB_REPOSITORY` and the app version into the app at build time. On startup, the update checker reads the repository's public GitHub Releases API, compares stable semantic versions, and opens a non-dismissible mandatory-update gate with the current platform's direct download when a newer stable release exists. A failed check is shown as unverified, with Retry and an explicit Continue option; the app retries after a detected network reconnection. Local builds without a valid repository setting report that updates are not configured instead of claiming the check succeeded.
 

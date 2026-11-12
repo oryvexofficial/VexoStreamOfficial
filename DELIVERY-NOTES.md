@@ -2,7 +2,7 @@
 
 ## Included work
 
-- App version is `1.0.1` (`1.0.1+4` build metadata).
+- App version is `1.0.2` (`1.0.2+7` build metadata).
 - Player: keeps the first-party player video path intact while omitting the broken loading poster, and adds “More like this,” the website keyboard-shortcut reference, share/embed snippets, and device-local Continue Watching with progress and resume.
 - Offline/update gates: animated no-connection modal with retry and reconnection handling; stable GitHub release check; mandatory update gate with verified Windows installer or Android APK link; explicit failed/unconfigured states, retry, and continue-with-warning.
 - Android/general: responsive drawer and page layouts, Check Host country flags, contrast/switch styling, and an APK CI build with the default Flutter ABI set.
@@ -37,7 +37,7 @@ bash tool/prepare_android.sh
 flutter pub get
 flutter test
 flutter build apk --release \
-  --dart-define=APP_VERSION=1.0.1 \
+  --dart-define=APP_VERSION=1.0.2 \
   --dart-define=VEXOSTREAM_GITHUB_REPOSITORY=OWNER/REPOSITORY \
   --dart-define=APP_KEY=YOUR_WORKER_APP_KEY
 ```

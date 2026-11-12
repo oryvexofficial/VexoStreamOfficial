@@ -42,6 +42,19 @@ void main() {
     expect(items[1]['thumbnail'], 'https://img.example.test/b.jpg');
   });
 
+  test('thumbnail lookup handles nested image objects and rejects non-image media links', () {
+    expect(videoThumbnail({
+      'thumbnail': {'src': 'https://img.example.test/nested.jpg'}
+    }), 'https://img.example.test/nested.jpg');
+    expect(videoThumbnail({
+      'images': [
+        {'url': 'https://cdn.example.test/clip.mp4'},
+        {'url': 'https://cdn.example.test/poster.jpg'},
+      ],
+    }), 'https://cdn.example.test/poster.jpg');
+    expect(videoThumbnail({'thumbnail': 'javascript:alert(1)'}), isEmpty);
+  });
+
   test('durations render like the site', () {
     expect(formatDuration(75), '1:15');
     expect(formatDuration('3725'), '1:02:05');

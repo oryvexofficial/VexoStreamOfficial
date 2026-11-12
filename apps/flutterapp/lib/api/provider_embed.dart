@@ -10,6 +10,12 @@ class ProviderEmbedInfo {
   final String provider;
   final Uri sourceUri;
   final Uri embedUri;
+
+  /// App-only route lets the Flutter shell own fullscreen behavior.
+  Uri get appEmbedUri {
+    final encodedTarget = embedUri.pathSegments.isEmpty ? '' : embedUri.pathSegments.last;
+    return Uri.https('vexostream.bond', '/embed/for/app/$encodedTarget');
+  }
 }
 
 const Map<String, String> _providerDomains = {
@@ -106,6 +112,14 @@ bool isAllowedProviderEmbedNavigation(String rawUrl) {
     return false;
   }
   final host = uri.host.toLowerCase().replaceFirst(RegExp(r'\.$'), '');
-  return (host == 'vexostream.bond' || host == 'www.vexostream.bond') &&
-      uri.path.startsWith('/embed/');
+  if (host != 'vexostream.bond' && host != 'www.vexostream.bond') return false;
+  final parts = uri.pathSegments;
+  final standardEmbed =
+      parts.length == 2 && parts[0] == 'embed' && parts[1].isNotEmpty;
+  final appEmbed = parts.length == 4 &&
+      parts[0] == 'embed' &&
+      parts[1] == 'for' &&
+      parts[2] == 'app' &&
+      parts[3].isNotEmpty;
+  return standardEmbed || appEmbed;
 }

@@ -19,6 +19,17 @@ function decodeVideoParam(param) {
     return decoded;
 }
 
+function embedRouteInfo(pathname) {
+    const parts = String(pathname || '').split('/');
+    if (parts.length === 3 && parts[1] === 'embed' && parts[2]) {
+        return { encoded: parts[2], appMode: false };
+    }
+    if (parts.length === 5 && parts[1] === 'embed' && parts[2] === 'for' && parts[3] === 'app' && parts[4]) {
+        return { encoded: parts[4], appMode: true };
+    }
+    return null;
+}
+
 function targetFromQuery(url) {
     const viewkey = url.searchParams.get('viewkey');
     const urlParam = url.searchParams.get('url');
@@ -36,14 +47,26 @@ async function appAdminEmbedMaintenanceGrant(request, url) {
         let referer;
         try { referer = new URL(request.headers.get('Referer') || ''); } catch (_) { return false; }
         if (referer.origin !== url.origin) return false;
-        const refererParts = referer.pathname.split('/');
-        if (refererParts.length !== 3 || refererParts[1] !== 'embed') return false;
-        const refererTarget = decodeVideoParam(refererParts[2]);
+        const refererEmbed = embedRouteInfo(referer.pathname);
+        if (!refererEmbed) return false;
+        const refererTarget = decodeVideoParam(refererEmbed.encoded);
+        if (!refererTarget || canonicalMediaTarget(refererTarget) !== canonicalMediaTarget(target)) return false;
+    } else if (url.pathname === '/api/posters') {
+        const posters = url.searchParams.getAll('u');
+        if (posters.length !== 1) return false;
+        target = posters[0] || '';
+        grant = request.headers.get('X-Vexo-Embed-Grant') || '';
+        let referer;
+        try { referer = new URL(request.headers.get('Referer') || ''); } catch (_) { return false; }
+        if (referer.origin !== url.origin) return false;
+        const refererEmbed = embedRouteInfo(referer.pathname);
+        if (!refererEmbed) return false;
+        const refererTarget = decodeVideoParam(refererEmbed.encoded);
         if (!refererTarget || canonicalMediaTarget(refererTarget) !== canonicalMediaTarget(target)) return false;
     } else {
-        const parts = url.pathname.split('/');
-        if (parts.length !== 3 || parts[1] !== 'embed') return false;
-        target = decodeVideoParam(parts[2]) || '';
+        const embed = embedRouteInfo(url.pathname);
+        if (!embed) return false;
+        target = decodeVideoParam(embed.encoded) || '';
         grant = url.searchParams.get('app_grant') || '';
     }
     return !!target && await verifyAppEmbedGrant(target, grant, { adminOnly: true });
@@ -516,17 +539,21 @@ async function handleRequest(request, env, ctx) {
         }
 
         const parts = path.split('/');
-        if ((parts[1] === 'video' || parts[1] === 'embed') && parts[2]) {
-            const target = decodeVideoParam(parts[2]);
+        const embedRoute = embedRouteInfo(path);
+        const isVideoRoute = parts.length === 3 && parts[1] === 'video' && parts[2];
+        if (isVideoRoute || embedRoute) {
+            const appEmbed = !!(embedRoute && embedRoute.appMode);
+            const routeToken = embedRoute ? embedRoute.encoded : parts[2];
+            const target = decodeVideoParam(routeToken);
             if (!target) return htmlResponse(render404Html(), 404, { ...SECURE_HTML_HEADERS, 'Cache-Control': 'no-store' });
-            const appGrant = parts[1] === 'embed' ? (url.searchParams.get('app_grant') || '') : '';
+            const appGrant = embedRoute ? (url.searchParams.get('app_grant') || '') : '';
             const validAppGrant = appGrant ? await verifyAppEmbedGrant(target, appGrant) : false;
             {
                 const cfg = await getProviderConfig(env, true);
                 const pv = providerForUrl(target);
                 if (isProviderHidden(cfg, pv)) return htmlResponse(render404Html(), 404, { ...SECURE_HTML_HEADERS, 'Cache-Control': 'no-store' });
                 if (isProviderLocked(cfg, pv)) {
-                    return parts[1] === 'embed'
+                    return embedRoute
                         ? htmlResponse(renderProviderLockedHtml(cfg, pv, true), 423, { ...EMBED_HTML_HEADERS, 'Cache-Control': 'no-store' })
                         : htmlResponse(renderProviderLockedHtml(cfg, pv, false), 423, { ...SECURE_HTML_HEADERS, 'Cache-Control': 'no-store' });
                 }
@@ -534,17 +561,21 @@ async function handleRequest(request, env, ctx) {
             // Log in to watch
             {
                 const mc = await getMembersConfig(env);
-                const gated = mc.requireLogin && (parts[1] === 'video' || mc.embedsToo);
+                const gated = mc.requireLogin && (!embedRoute || mc.embedsToo);
                 if (gated && !validAppGrant && !(await verifyMemberSession(request, env)) && !(await verifyAdminSession(request, env))) {
-                    if (parts[1] === 'embed') return htmlResponse(renderEmbedGateHtml(url.origin, '/embed/' + parts[2]), 200, { ...EMBED_HTML_HEADERS, 'Cache-Control': 'no-store' });
+                    if (embedRoute) {
+                        const next = appEmbed ? '/embed/for/app/' + routeToken : '/embed/' + routeToken;
+                        return htmlResponse(renderEmbedGateHtml(url.origin, next), 200, { ...EMBED_HTML_HEADERS, 'Cache-Control': 'no-store' });
+                    }
                     let pv = { title: '', thumb: '' };
                     if (isSocialEmbedBot(request.headers.get('User-Agent'))) pv = await socialPreview(target);
                     const gm = buildSocialCardMetaTags({ title: pv.title ? pv.title + ' | VexoStream' : 'Please log in first | VexoStream', description: 'Log in or create a free account to watch on VexoStream.', url: path, image: pv.thumb, robots: SEO_NOINDEX, canonical: false });
                     return htmlResponse(renderAuthHtml('login', { next: path, gate: true, meta: gm }), 200, { ...SECURE_HTML_HEADERS, 'Cache-Control': 'no-store' });
                 }
             }
-            const canonical = url.origin + '/' + parts[1] + '/' + parts[2];
-            const embedUrl = url.origin + '/embed/' + parts[2];
+            const routeName = embedRoute ? 'embed' : 'video';
+            const canonical = url.origin + '/' + routeName + '/' + routeToken;
+            const embedUrl = url.origin + '/embed/' + routeToken;
             let preview = { title: '', thumb: '' };
             if (isSocialEmbedBot(request.headers.get('User-Agent'))) preview = await socialPreview(target);
             const title = preview.title || 'VexoStream Player';
@@ -558,7 +589,10 @@ async function handleRequest(request, env, ctx) {
                 image: preview.thumb,
                 video: embedUrl
             });
-            if (parts[1] === 'embed') return htmlResponse(renderEmbedHtml(target, meta, preview.thumb, validAppGrant ? appGrant : '', url.searchParams.get('app_player') === '1'), 200, EMBED_HTML_HEADERS);
+            if (embedRoute) {
+                const appThumb = appEmbed ? normalizeThumbnailUrl(url.searchParams.get('app_thumb') || '') : '';
+                return htmlResponse(renderEmbedHtml(target, meta, appThumb || preview.thumb, validAppGrant ? appGrant : '', appEmbed), 200, EMBED_HTML_HEADERS);
+            }
             return htmlResponse(renderWatchHtml(target, meta, { title: preview.title, thumb: preview.thumb }));
         }
 

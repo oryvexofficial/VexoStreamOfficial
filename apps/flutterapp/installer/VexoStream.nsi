@@ -2,7 +2,7 @@ Unicode true
 !include "MUI2.nsh"
 
 !ifndef PRODUCT_VERSION
-  !define PRODUCT_VERSION "1.0.1.4"
+  !define PRODUCT_VERSION "1.0.2.7"
 !endif
 
 Name "VexoStream"

@@ -143,9 +143,9 @@ test('owner app embed and stream extraction continue working during maintenance'
   assert.match(grant, /^\d{10}\.admin\.[a-f0-9]{64}$/);
 
   const encodedVideo = Buffer.from(videoUrl).toString('base64url');
-  const embedUrl = new URL(`https://vexostream.bond/embed/${encodedVideo}`);
+  const embedUrl = new URL(`https://vexostream.bond/embed/for/app/${encodedVideo}`);
   embedUrl.searchParams.set('app_grant', grant);
-  embedUrl.searchParams.set('app_player', '1');
+  embedUrl.searchParams.set('app_thumb', 'https://thumb.example.test/video.jpg');
   const pageHeaders = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36',
     'Accept-Language': headers['Accept-Language'],
@@ -155,20 +155,31 @@ test('owner app embed and stream extraction continue working during maintenance'
   assert.equal(page.status, 200);
   const html = await page.text();
   assert.match(html, /id="vxVideo"/);
+  assert.match(html, /class="embed app-embed"/);
+  assert.match(html, /thumb\.example\.test/);
+  assert.match(html, /"appMode":true/);
   assert.doesNotMatch(html, /We&rsquo;ll be right back\./);
   const config = html.match(/window\.VX=(\{.*?\});window\.API_TOKEN/s);
   assert.ok(config, 'embedded player contains its browser session config');
   const browserToken = JSON.parse(config[1]).token;
 
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = async () => new Response(JSON.stringify({
-    status: 'success',
-    title: 'Maintenance embed test',
-    streams: {
-      qualities: [{ quality: '480p', type: 'mp4', url: 'https://cdn.example.test/video.mp4' }],
-      fallback: []
+  globalThis.fetch = async (input) => {
+    const requestUrl = new URL(typeof input === 'string' ? input : input.url);
+    if (requestUrl.pathname === '/api/posters') {
+      return new Response(JSON.stringify({
+        posters: { [videoUrl]: 'https://thumb.example.test/resolved.jpg' }
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } });
     }
-  }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    return new Response(JSON.stringify({
+      status: 'success',
+      title: 'Maintenance embed test',
+      streams: {
+        qualities: [{ quality: '480p', type: 'mp4', url: 'https://cdn.example.test/video.mp4' }],
+        fallback: []
+      }
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  };
   try {
     const extractUrl = new URL('https://vexostream.bond/api/extract');
     extractUrl.searchParams.set('url', videoUrl);
@@ -178,10 +189,26 @@ test('owner app embed and stream extraction continue working during maintenance'
         ...pageHeaders,
         'X-Edge-Token': browserToken,
         'X-Vexo-Embed-Grant': grant,
-        Referer: `https://vexostream.bond/embed/${encodedVideo}`
+        Referer: `https://vexostream.bond/embed/for/app/${encodedVideo}`
       }
     }), env, ctx);
     assert.equal(extraction.status, 200, await extraction.clone().text());
+
+    const posterUrl = new URL('https://vexostream.bond/api/posters');
+    posterUrl.searchParams.set('u', videoUrl);
+    posterUrl.searchParams.set('token', browserToken);
+    const posterResponse = await worker.fetch(new Request(posterUrl, {
+      headers: {
+        ...pageHeaders,
+        'X-Edge-Token': browserToken,
+        'X-Vexo-Embed-Grant': grant,
+        Referer: `https://vexostream.bond/embed/for/app/${encodedVideo}`
+      }
+    }), env, ctx);
+    assert.equal(posterResponse.status, 200, await posterResponse.clone().text());
+    assert.deepEqual(await posterResponse.json(), {
+      posters: { [videoUrl]: 'https://thumb.example.test/resolved.jpg' }
+    });
   } finally {
     globalThis.fetch = originalFetch;
   }

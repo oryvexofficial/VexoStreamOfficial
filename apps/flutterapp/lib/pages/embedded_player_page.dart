@@ -49,6 +49,10 @@ class _PlayerPageState extends State<PlayerPage> {
   List<Map<String, dynamic>> _related = [];
   bool _relatedLoading = true;
   String? _relatedError;
+  String _relatedQuery = '';
+  String _resolvedTitle = '';
+  String _resolvedProvider = '';
+  String _resolvedThumbnail = '';
   Timer? _historyTimer;
   bool _savingHistory = false;
   bool _isFullscreen = false;
@@ -115,10 +119,19 @@ class _PlayerPageState extends State<PlayerPage> {
       if (mounted) setState(() => _relatedLoading = false);
       return;
     }
+    final query = recommendationQuery(_title);
+    if (_relatedQuery == query) return;
+    _relatedQuery = query;
+    if (mounted) {
+      setState(() {
+        _relatedLoading = true;
+        _relatedError = null;
+      });
+    }
     try {
       final data = await widget.api.get('/catalog', query: {
         'provider': embed.provider,
-        'q': recommendationQuery(_title),
+        'q': query,
         'page': 1,
       });
       if (mounted) setState(() {
@@ -130,12 +143,27 @@ class _PlayerPageState extends State<PlayerPage> {
     }
   }
 
-  String get _title => firstText(widget.video, const ['title', 'name']);
+  String get _title {
+    final supplied = firstText(widget.video, const ['title', 'name', 'video_title']);
+    if (supplied.isNotEmpty && supplied.toLowerCase() != 'vexostream player') {
+      return supplied;
+    }
+    return _resolvedTitle.isNotEmpty ? _resolvedTitle : supplied;
+  }
   String get _target => firstText(widget.video, const ['url', 'video_url', 'link', 'href']);
 
   void _updateQualityState(EmbeddedQualityState state) {
     if (!mounted) return;
-    setState(() => _qualityState = state);
+    final previousTitle = _resolvedTitle;
+    setState(() {
+      _qualityState = state;
+      if (state.title.isNotEmpty) _resolvedTitle = state.title;
+      if (state.provider.isNotEmpty) _resolvedProvider = state.provider;
+      if (state.thumbnail.isNotEmpty) _resolvedThumbnail = state.thumbnail;
+    });
+    if (_resolvedTitle.isNotEmpty && _resolvedTitle != previousTitle) {
+      unawaited(_loadRelated());
+    }
   }
 
   Future<void> _selectQuality(int? index) async {
@@ -165,7 +193,9 @@ class _PlayerPageState extends State<PlayerPage> {
         url: target,
         title: _title.isEmpty ? 'VexoStream Player' : _title,
         provider: firstText(widget.video, const ['provider', 'source']),
-        thumbnail: videoThumbnail(widget.video),
+        thumbnail: videoThumbnail(widget.video).isNotEmpty
+            ? videoThumbnail(widget.video)
+            : _resolvedThumbnail,
         position: progress.positionSeconds.floor(),
         duration: progress.durationSeconds.floor(),
         updatedAt: DateTime.now().millisecondsSinceEpoch,
@@ -213,7 +243,8 @@ class _PlayerPageState extends State<PlayerPage> {
   Widget build(BuildContext context) {
     final embed = providerEmbedForVideo(widget.video);
     final title = _title.isEmpty ? 'VexoStream Player' : _title;
-    final provider = firstText(widget.video, const ['provider']);
+    final sourceProvider = firstText(widget.video, const ['provider']);
+    final provider = sourceProvider.isNotEmpty ? sourceProvider : _resolvedProvider;
 
     return PopScope<Object?>(
       canPop: !_isFullscreen,

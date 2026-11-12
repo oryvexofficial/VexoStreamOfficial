@@ -57,12 +57,18 @@ class EmbeddedQualityState {
     this.isAuto = true,
     this.currentIndex,
     this.currentLabel,
+    this.title = '',
+    this.provider = '',
+    this.thumbnail = '',
   });
 
   final List<EmbeddedPlayerQuality> options;
   final bool isAuto;
   final int? currentIndex;
   final String? currentLabel;
+  final String title;
+  final String provider;
+  final String thumbnail;
 
   static EmbeddedQualityState? parseScriptResult(Object? result) {
     if (result == null) return null;
@@ -99,6 +105,9 @@ class EmbeddedQualityState {
       isAuto: decoded['auto'] == true,
       currentIndex: currentIndex,
       currentLabel: current.isEmpty ? null : current.first.label,
+      title: decoded['title']?.toString().trim() ?? '',
+      provider: decoded['provider']?.toString().trim() ?? '',
+      thumbnail: decoded['thumbnail']?.toString().trim() ?? '',
     );
   }
 }
@@ -158,10 +167,11 @@ class VexoEmbedViewState extends State<VexoEmbedView> {
       }
       final resumeAt = int.tryParse(widget.video['resumeAt']?.toString() ?? '') ?? 0;
       final playerParams = <String, String>{
-        'app_player': '1',
+        if (videoThumbnail(widget.video).isNotEmpty)
+          'app_thumb': videoThumbnail(widget.video),
         if (resumeAt > 0) 'app_resume': '$resumeAt',
       };
-      var target = widget.embed.embedUri.replace(queryParameters: playerParams);
+      var target = widget.embed.appEmbedUri.replace(queryParameters: playerParams);
       if (widget.api.hasToken) {
         try {
           final grantResponse = asMap(await widget.api.post(
@@ -177,6 +187,17 @@ class VexoEmbedViewState extends State<VexoEmbedView> {
             ...playerParams,
             'app_grant': grant,
           });
+          if (!playerParams.containsKey('app_thumb')) {
+            final poster = (await widget.api.posters([
+              widget.embed.sourceUri.toString(),
+            ]))[widget.embed.sourceUri.toString()];
+            if (poster != null && poster.isNotEmpty) {
+              target = target.replace(queryParameters: {
+                ...target.queryParameters,
+                'app_thumb': poster,
+              });
+            }
+          }
         } on ApiException catch (error) {
           if (!mounted) return;
           setState(() {
@@ -216,6 +237,7 @@ class VexoEmbedViewState extends State<VexoEmbedView> {
           if (!mounted) return;
           _qualityPoll?.cancel();
           setState(() {
+            _error = 'The player page could not connect. Check your connection, then try again.';
             _loading = false;
           });
         });
@@ -260,13 +282,10 @@ class VexoEmbedViewState extends State<VexoEmbedView> {
     try {
       final result = await _controller.executeScript(r'''
         (function () {
-          if (!document.getElementById('vexo-app-no-poster')) {
-            var style = document.createElement('style');
-            style.id = 'vexo-app-no-poster';
-            style.textContent = '#vxPoster { display: none !important; background-image: none !important; }';
-            document.head.appendChild(style);
-          }
           var player = window.VXPlayer;
+          if (!player) return null;
+          var metadata = typeof player.metadata === 'function' ? player.metadata() : {};
+          var queue = typeof player.queue === 'function' ? player.queue() || [] : [];
           var appVideo = document.getElementById('vxVideo');
           var resumeAt = Number(new URLSearchParams(location.search).get('app_resume'));
           if (resumeAt > 0 && !window.__vexoAppResumeApplied && appVideo &&
@@ -275,11 +294,12 @@ class VexoEmbedViewState extends State<VexoEmbedView> {
             appVideo.currentTime = resumeAt;
             window.__vexoAppResumeApplied = true;
           }
-          if (!player || typeof player.queue !== 'function') return null;
-          var queue = player.queue() || [];
           return JSON.stringify({
-            auto: !!player.isAuto(),
-            current: player.current(),
+            auto: typeof player.isAuto === 'function' ? !!player.isAuto() : true,
+            current: typeof player.current === 'function' ? player.current() : -1,
+            title: String(metadata.title || ''),
+            provider: String(metadata.provider || ''),
+            thumbnail: String(metadata.thumbnail || ''),
             qualities: queue.map(function (item, index) {
               return {
                 index: index,
@@ -300,6 +320,9 @@ class VexoEmbedViewState extends State<VexoEmbedView> {
         state.isAuto,
         state.currentIndex,
         state.currentLabel,
+        state.title,
+        state.provider,
+        state.thumbnail,
         ...state.options.map((quality) => '${quality.index}:${quality.label}:${quality.format}'),
       ].join('|');
       if (signature == _lastQualitySignature) return;

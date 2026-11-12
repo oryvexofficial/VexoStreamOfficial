@@ -98,7 +98,7 @@ class _HomePageState extends State<HomePage> {
       value = 'https://www.pornhub.com/view_video.php?viewkey=${m.group(1)}';
     }
     setState(() => _hint = null);
-    widget.onPlay({'url': value, 'title': 'VexoStream player'});
+    widget.onPlay({'url': value});
   }
 
   @override
