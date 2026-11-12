@@ -369,6 +369,23 @@ String _thumbnailCandidate(dynamic value, [int depth = 0]) {
   return uri.toString();
 }
 
+bool _hasPlaceholderThumbnail(dynamic value, [int depth = 0]) {
+  if (depth > 3 || value == null) return false;
+  if (value is Iterable) {
+    return value.take(12).any((item) => _hasPlaceholderThumbnail(item, depth + 1));
+  }
+  if (value is Map) {
+    const aliases = [
+      'url', 'src', 'image', 'image_url', 'thumbnail', 'thumbnail_url',
+      'thumb', 'thumb_url', 'poster', 'poster_url', 'default_thumb',
+      'cover_image', 'preview_image',
+    ];
+    return aliases.any((key) => _hasPlaceholderThumbnail(value[key], depth + 1));
+  }
+  return RegExp(r'(?:blank|placeholder|default)\.gif(?:[?#]|$)', caseSensitive: false)
+      .hasMatch(value.toString().trim());
+}
+
 /// Catalogue responses are either a bare list or wrapped in a map.
 List<Map<String, dynamic>> videoItems(dynamic value) {
   final map = asMap(value);
@@ -376,7 +393,8 @@ List<Map<String, dynamic>> videoItems(dynamic value) {
   return raw.map(asMap).where((it) {
     final url = firstText(it, const ['url', 'video_url', 'link', 'href']);
     final thumb = videoThumbnail(it).toLowerCase();
-    return url.isNotEmpty && !thumb.contains('blank.gif');
+    return url.isNotEmpty && !thumb.contains('blank.gif') &&
+        (thumb.isNotEmpty || !_hasPlaceholderThumbnail(it));
   }).map((it) {
     final normalized = Map<String, dynamic>.from(it);
     final thumb = videoThumbnail(it);
