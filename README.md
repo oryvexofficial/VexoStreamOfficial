@@ -92,7 +92,7 @@ The provided site already forwards catalog, model, poster, and stream-extraction
    git push -u origin main
    ```
 
-4. Configure the repository secret `APP_KEY` for API-ready artifacts. After a successful push to `main` or `master`, GitHub Actions automatically creates the stable `v<version>` tag from `apps/flutterapp/pubspec.yaml`, creates a non-draft, non-prerelease GitHub Release, and uploads the Windows installer, portable ZIP, and universal Android APK if that version has not already been released. The release is marked as latest. Later pushes without a version bump still run CI but skip publishing, so existing releases are never overwritten. Bump the app version for each new release; pull requests do not publish releases. You can also push a matching stable version tag manually. Without `APP_KEY`, the release is still published as a stable release, but its artifacts are marked validation-only and protected API calls will not work.
+4. Configure the optional repository secret `APP_KEY` to build API-ready artifacts. After a successful push to `main` or `master`, GitHub Actions automatically creates the `v<version>` tag from `apps/flutterapp/pubspec.yaml`, creates a GitHub Release, and uploads the Windows installer, portable ZIP, and universal Android APK if that version has not already been released. Later pushes without a version bump still run CI but skip publishing, so existing releases are never overwritten. Bump the app version for each new release; pull requests do not publish releases. You can also push a matching version tag manually. Without `APP_KEY`, artifacts are labeled validation-only and the Release is a pre-release.
 
 The repo is arranged so GitHub sees `site/`, `apps/`, `.github/`, and this README at the root. It does not contain a `.git` directory or your GitHub credentials.
 
@@ -108,7 +108,7 @@ Set Worker secrets in Cloudflare before deploying:
 - `TELEGRAM_BOT_TOKEN`: optional, only if the Telegram bot is enabled.
 - `ADMIN_USERS`: optional legacy bootstrap admins, if used.
 
-Set `APP_KEY` only as a Cloudflare Worker secret with `npx wrangler secret put APP_KEY` from `site/`. Site deployment remains manual; GitHub Actions never deploys the Worker. To build API-ready app artifacts, add the same value as the repository **secret** `APP_KEY`. The key is embedded in client binaries and can be extracted, so it is not a durable secret. Without the Actions secret, builds are marked validation-only and published as stable GitHub Releases, but protected API calls in those binaries will not work. Alternatively, pass `--dart-define=APP_KEY=<same-value>` to a local Flutter build.
+Set `APP_KEY` only as a Cloudflare Worker secret with `npx wrangler secret put APP_KEY` from `site/`. Site deployment remains manual; GitHub Actions never deploys the Worker. To build API-ready app artifacts, add the same value as the repository **secret** `APP_KEY`. The key is embedded in client binaries and can be extracted, so it is not a durable secret. Without the Actions secret, builds are marked validation-only and their releases are pre-releases excluded from stable update checks. Alternatively, pass `--dart-define=APP_KEY=<same-value>` to a local Flutter build.
 
 Set the Worker `RAILWAY_URL` (or `BACKEND_URL`) to the public HTTPS origin for the VexoStream Core service. Do not put `EDGE_TOKEN` in Flutter or in the repository. If using the admin panel's backend override, that saved value takes precedence over the Worker variable.
 

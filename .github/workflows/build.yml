@@ -262,8 +262,8 @@ jobs:
             echo "Release tag $RELEASE_TAG does not match app version $APP_VERSION in pubspec.yaml." >&2
             exit 1
           fi
-          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "Stable release tag must use a version such as v1.0.0, with no pre-release suffix." >&2
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "Release tag must use a version tag such as v1.0.0." >&2
             exit 1
           fi
       - name: Verify automatic release tag is safe
@@ -351,9 +351,9 @@ jobs:
           name: VexoStream ${{ needs.windows.outputs.tag_name }}
           body: |
             VexoStream ${{ needs.windows.outputs.tag_name }} release.
-            ${{ env.APP_KEY == '' && 'VALIDATION BUILD: APP_KEY is missing. Protected API calls will not work. Add the APP_KEY repository secret and publish a new app version for API-ready builds.' || 'API-ready build. Windows installer, portable ZIP, and universal Android APK are attached.' }}
+            ${{ env.APP_KEY == '' && 'VALIDATION BUILD: APP_KEY is missing. Protected API calls will not work. This release is marked as a pre-release and is excluded from automatic stable update checks.' || 'API-ready build. Windows installer, portable ZIP, and universal Android APK are attached.' }}
           files: release-assets/*
           draft: false
-          prerelease: false
-          make_latest: true
+          prerelease: ${{ env.APP_KEY == '' || contains(needs.windows.outputs.tag_name, '-') }}
+          make_latest: ${{ env.APP_KEY != '' && !contains(needs.windows.outputs.tag_name, '-') }}
           fail_on_unmatched_files: true

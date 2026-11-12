@@ -2,10 +2,26 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
 import 'package:vexostream_app/api/provider_embed.dart';
 import 'package:vexostream_app/api/vexo_api.dart';
 import 'package:vexostream_app/pages/embedded_player_page.dart';
 import 'package:vexostream_app/widgets/provider_embed_view.dart';
+
+class _LoginRequiredConfigClient extends http.BaseClient {
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) async {
+    final payload = request.url.path.endsWith('/config')
+        ? {'access': {'requireLogin': true}}
+        : {'videos': <dynamic>[]};
+    return http.StreamedResponse(
+      Stream.value(utf8.encode(jsonEncode(payload))),
+      200,
+      headers: const {'content-type': 'application/json'},
+      request: request,
+    );
+  }
+}
 
 void main() {
   group('VexoStream embed URL validation', () {
@@ -131,6 +147,10 @@ void main() {
   });
 
   testWidgets('app player never sends unsupported sources to the WebView', (tester) async {
+    tester.view.physicalSize = const Size(320, 720);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
     final api = VexoApi();
     await tester.pumpWidget(MaterialApp(
       home: PlayerPage(
@@ -140,6 +160,7 @@ void main() {
       ),
     ));
 
+    await tester.pumpAndSettle();
     expect(find.text('Unsupported video link'), findsOneWidget);
     expect(
       find.text(
@@ -148,6 +169,27 @@ void main() {
       findsOneWidget,
     );
     expect(find.text('Open embedded player'), findsNothing);
+    expect(tester.takeException(), isNull);
+    api.close();
+  });
+
+  testWidgets('anonymous app viewer sees the login gate when members-only playback is enabled', (tester) async {
+    final api = VexoApi(client: _LoginRequiredConfigClient());
+    var signInOpened = false;
+    await tester.pumpWidget(MaterialApp(
+      home: PlayerPage(
+        api: api,
+        video: {'url': 'https://www.xvideos.com/video123456/example'},
+        onSignIn: () async { signInOpened = true; },
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.text('You must log in to continue'), findsOneWidget);
+    expect(find.text('Log in'), findsOneWidget);
+    await tester.tap(find.text('Log in'));
+    await tester.pump();
+    expect(signInOpened, isTrue);
     api.close();
   });
 }

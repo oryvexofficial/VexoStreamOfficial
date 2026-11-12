@@ -290,6 +290,6 @@ function renderAuthHtml(mode, opts = {}) {
 function renderEmbedGateHtml(origin, next) {
     return '<!DOCTYPE html><html lang="en" class="embed" data-theme="dark"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex"><title>Please log in first</title>' + FONT_LINKS +
         '<style>' + APP_CSS + 'html.embed body{display:grid;place-items:center;min-height:100vh;color:#f5f5f7;text-align:center;padding:24px;background:#05070c}b{display:block;font:800 24px/1.1 var(--font-display);letter-spacing:-.03em;margin-bottom:8px}p{margin:0 0 18px;color:#a1a1a6;font-size:15px}a.btn{display:inline-flex}</style></head>' +
-        '<body><div><b>Please log in first.</b><p>Videos are for VexoStream members.</p><a class="btn" href="' + escapeHtml(origin + '/login?next=' + encodeURIComponent(next)) + '" target="_blank" rel="noopener">Log in to watch</a></div></body></html>';
+        '<body><div><b>Please log in first.</b><p>Videos are for VexoStream members.</p><a class="btn" href="' + escapeHtml(origin + '/login?next=' + encodeURIComponent(next)) + '" target="_top">Log in to watch</a></div></body></html>';
 }
 

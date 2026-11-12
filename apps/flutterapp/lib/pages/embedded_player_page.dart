@@ -19,6 +19,11 @@ String recommendationQuery(String title) {
   return words.isEmpty ? 'trending' : words;
 }
 
+bool appRequiresMemberLogin(Map<String, dynamic> config) {
+  final access = asMap(config['access']);
+  return access['requireLogin'] == true;
+}
+
 /// The app's playback surface is VexoStream's own web player, hosted in a
 /// first-party WebView. There is no native media-kit playback path.
 class PlayerPage extends StatefulWidget {
@@ -47,15 +52,61 @@ class _PlayerPageState extends State<PlayerPage> {
   Timer? _historyTimer;
   bool _savingHistory = false;
   bool _isFullscreen = false;
+  bool _accessChecking = true;
+  bool _requiresMemberLogin = false;
+  String? _accessError;
 
   @override
   void initState() {
     super.initState();
+    unawaited(_checkAccess());
     _loadRelated();
     _historyTimer = Timer.periodic(
       const Duration(seconds: 5),
       (_) => unawaited(_savePlaybackProgress()),
     );
+  }
+
+  Future<void> _checkAccess() async {
+    if (mounted) {
+      setState(() {
+        _accessChecking = true;
+        _accessError = null;
+      });
+    }
+    if (providerEmbedForVideo(widget.video) == null) {
+      if (mounted) {
+        setState(() {
+          _accessChecking = false;
+          _requiresMemberLogin = false;
+        });
+      }
+      return;
+    }
+    try {
+      final config = asMap(await widget.api.get('/config'));
+      final access = asMap(config['access']);
+      if (!access.containsKey('requireLogin')) {
+        throw const ApiException('The server did not return playback access settings.');
+      }
+      if (!mounted) return;
+      setState(() {
+        _requiresMemberLogin = appRequiresMemberLogin(config);
+        _accessChecking = false;
+      });
+    } on ApiException catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _accessError = error.message;
+        _accessChecking = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _accessError = 'Could not verify playback access. Check your connection and try again.';
+        _accessChecking = false;
+      });
+    }
   }
 
   Future<void> _loadRelated() async {
@@ -201,7 +252,9 @@ class _PlayerPageState extends State<PlayerPage> {
               ),
               body: PageBody(
                 maxWidth: 1240,
-                padding: const EdgeInsets.fromLTRB(28, 24, 28, 40),
+                padding: MediaQuery.sizeOf(context).width < 600
+                    ? const EdgeInsets.fromLTRB(16, 16, 16, 28)
+                    : const EdgeInsets.fromLTRB(28, 24, 28, 40),
                 children: [
                   AspectRatio(
                     aspectRatio: 16 / 9,
@@ -214,30 +267,51 @@ class _PlayerPageState extends State<PlayerPage> {
                   const SizedBox(height: 20),
                   Text(title, style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontSize: 24)),
                   const SizedBox(height: 10),
-                  Row(children: [
-                    if (provider.isNotEmpty) ...[
-                      ProviderIcon(id: provider.toLowerCase(), name: provider, size: 22),
-                      const SizedBox(width: 8),
-                      Text(
-                        provider[0].toUpperCase() + provider.substring(1),
-                        style: Vx.sans(size: 14, color: Vx.text2, weight: FontWeight.w500),
-                      ),
-                      const SizedBox(width: 14),
-                    ],
-                    Expanded(
-                      child: Text(
-                        _target,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Vx.mono(size: 12),
-                      ),
-                    ),
-                    TextButton.icon(
+                  LayoutBuilder(builder: (context, constraints) {
+                    final compact = constraints.maxWidth < 480;
+                    final providerInfo = provider.isEmpty
+                        ? const SizedBox.shrink()
+                        : Row(mainAxisSize: MainAxisSize.min, children: [
+                            ProviderIcon(id: provider.toLowerCase(), name: provider, size: 22),
+                            const SizedBox(width: 8),
+                            Text(
+                              provider[0].toUpperCase() + provider.substring(1),
+                              style: Vx.sans(size: 14, color: Vx.text2, weight: FontWeight.w500),
+                            ),
+                          ]);
+                    final copyButton = TextButton.icon(
                       onPressed: () => _copy(context, _target, 'Original video link copied'),
                       icon: const Icon(Icons.copy_rounded, size: 16),
                       label: const Text('Copy link'),
-                    ),
-                  ]),
+                    );
+                    final targetText = Text(
+                      _target,
+                      maxLines: compact ? 2 : 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Vx.mono(size: 12),
+                    );
+                    if (compact) {
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          if (provider.isNotEmpty) ...[
+                            providerInfo,
+                            const SizedBox(height: 6),
+                          ],
+                          targetText,
+                          Align(alignment: Alignment.centerRight, child: copyButton),
+                        ],
+                      );
+                    }
+                    return Row(children: [
+                      if (provider.isNotEmpty) ...[
+                        providerInfo,
+                        const SizedBox(width: 14),
+                      ],
+                      Expanded(child: targetText),
+                      copyButton,
+                    ]);
+                  }),
                   const SizedBox(height: 32),
                   _shortcuts(),
                   const SizedBox(height: 32),
@@ -259,7 +333,75 @@ class _PlayerPageState extends State<PlayerPage> {
     );
   }
 
-  Widget _playerSurface(ProviderEmbedInfo? embed) => Stack(
+  Widget _playerSurface(ProviderEmbedInfo? embed) {
+    if (_accessChecking) {
+      return const ColoredBox(
+        color: Colors.black,
+        child: Center(child: CircularProgressIndicator()),
+      );
+    }
+    if (_accessError != null) {
+      return ColoredBox(
+        color: Colors.black,
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              const Icon(Icons.lock_outline_rounded, size: 34, color: Colors.white70),
+              const SizedBox(height: 10),
+              Text(
+                'Could not verify playback access',
+                textAlign: TextAlign.center,
+                style: Vx.sans(size: 18, color: Colors.white, weight: FontWeight.w700),
+              ),
+              const SizedBox(height: 8),
+              Text(_accessError!, textAlign: TextAlign.center, style: Vx.sans(size: 13, color: Vx.text2)),
+              const SizedBox(height: 12),
+              FilledButton.icon(
+                onPressed: _checkAccess,
+                icon: const Icon(Icons.refresh_rounded, size: 16),
+                label: const Text('Try again'),
+              ),
+            ]),
+          ),
+        ),
+      );
+    }
+    if (_requiresMemberLogin && !widget.api.hasToken) {
+      return ColoredBox(
+        color: Colors.black,
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(20),
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              const Icon(Icons.lock_outline_rounded, size: 34, color: Colors.white70),
+              const SizedBox(height: 10),
+              Text(
+                'You must log in to continue',
+                textAlign: TextAlign.center,
+                style: Vx.sans(size: 18, color: Colors.white, weight: FontWeight.w700),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Sign in to your VexoStream account to watch this video.',
+                textAlign: TextAlign.center,
+                style: Vx.sans(size: 13, color: Vx.text2),
+              ),
+              const SizedBox(height: 14),
+              FilledButton.icon(
+                onPressed: () async {
+                  await widget.onSignIn();
+                  if (mounted && widget.api.hasToken) await _checkAccess();
+                },
+                icon: const Icon(Icons.login_rounded, size: 16),
+                label: const Text('Log in'),
+              ),
+            ]),
+          ),
+        ),
+      );
+    }
+    return Stack(
         fit: StackFit.expand,
         children: [
           ClipRRect(
@@ -312,6 +454,7 @@ class _PlayerPageState extends State<PlayerPage> {
             ),
         ],
       );
+  }
 
   @override
   void dispose() {

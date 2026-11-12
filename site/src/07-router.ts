@@ -513,7 +513,7 @@ async function handleRequest(request, env, ctx) {
                 const mc = await getMembersConfig(env);
                 const gated = mc.requireLogin && (parts[1] === 'video' || mc.embedsToo);
                 if (gated && !validAppGrant && !(await verifyMemberSession(request, env)) && !(await verifyAdminSession(request, env))) {
-                    if (parts[1] === 'embed') return htmlResponse(renderEmbedGateHtml(url.origin, '/video/' + parts[2]), 200, { ...EMBED_HTML_HEADERS, 'Cache-Control': 'no-store' });
+                    if (parts[1] === 'embed') return htmlResponse(renderEmbedGateHtml(url.origin, '/embed/' + parts[2]), 200, { ...EMBED_HTML_HEADERS, 'Cache-Control': 'no-store' });
                     let pv = { title: '', thumb: '' };
                     if (isSocialEmbedBot(request.headers.get('User-Agent'))) pv = await socialPreview(target);
                     const gm = buildSocialCardMetaTags({ title: pv.title ? pv.title + ' | VexoStream' : 'Please log in first | VexoStream', description: 'Log in or create a free account to watch on VexoStream.', url: path, image: pv.thumb, robots: SEO_NOINDEX, canonical: false });

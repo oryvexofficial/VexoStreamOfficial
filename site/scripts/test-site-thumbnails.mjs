@@ -60,6 +60,20 @@ test('/video and /embed pages render the shared poster loader and fallback logic
   }
 });
 
+test('watch page keeps a fluid player and compact controls on phone widths', async () => {
+  const target = 'https://www.xvideos.com/video123456/example';
+  const response = await worker.fetch(
+    new Request(pageUrl('video', target), { headers: browserHeaders }),
+    env,
+    ctx
+  );
+  const html = await response.text();
+  assert.equal(response.status, 200);
+  assert.ok(html.includes('.watch-grid{width:100%;gap:0}'));
+  assert.ok(html.includes('.stage .vx-player{width:100%;max-width:100vw;aspect-ratio:16/9}'));
+  assert.match(html, /@media\s?\(max-width:359px\)/);
+});
+
 test('app player skips the loading poster without changing standard embeds', async () => {
   const target = 'https://www.xvideos.com/video123456/example';
   const response = await worker.fetch(new Request(pageUrl('embed', target) + '?app_player=1', {

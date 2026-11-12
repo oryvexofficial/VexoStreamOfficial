@@ -9,7 +9,7 @@
     "format:check": "prettier --check \"src/**/*.ts\" scripts package.json tsconfig.json",
     "deploy": "npm test && wrangler deploy",
     "check": "npm run build && node --check dist/worker.js",
-    "test": "npm run build && node --test scripts/test-checkhost.mjs scripts/test-api-v1.mjs scripts/test-app-stream.mjs scripts/test-app-models.mjs scripts/test-app-status.mjs scripts/test-app-search-default.mjs scripts/test-app-owner.mjs scripts/test-maintenance.mjs scripts/test-provider-embeds.mjs scripts/test-site-thumbnails.mjs scripts/test-app-embed-grant.mjs",
+    "test": "npm run build && node --test scripts/test-checkhost.mjs scripts/test-api-v1.mjs scripts/test-app-stream.mjs scripts/test-app-models.mjs scripts/test-app-status.mjs scripts/test-app-search-default.mjs scripts/test-app-owner.mjs scripts/test-maintenance.mjs scripts/test-provider-embeds.mjs scripts/test-site-thumbnails.mjs scripts/test-embed-login-gate.mjs scripts/test-app-embed-grant.mjs",
     "flags": "node scripts/fetch-flags.mjs"
   },
   "devDependencies": {

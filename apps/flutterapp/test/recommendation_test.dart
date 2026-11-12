@@ -8,4 +8,14 @@ void main() {
     expect(recommendationQuery('VexoStream player'), 'trending');
     expect(recommendationQuery(''), 'trending');
   });
+
+  test('app playback follows the server member-login setting', () {
+    expect(appRequiresMemberLogin({
+      'access': {'requireLogin': true},
+    }), isTrue);
+    expect(appRequiresMemberLogin({
+      'access': {'requireLogin': false},
+    }), isFalse);
+    expect(appRequiresMemberLogin(const <String, dynamic>{}), isFalse);
+  });
 }

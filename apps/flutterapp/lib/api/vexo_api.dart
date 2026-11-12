@@ -44,7 +44,7 @@ class VexoApi {
   static const _override = String.fromEnvironment('VEXOSTREAM_API_BASE');
   static const appKey = String.fromEnvironment('APP_KEY');
   static const appVersion =
-      String.fromEnvironment('APP_VERSION', defaultValue: '1.0.0');
+      String.fromEnvironment('APP_VERSION', defaultValue: '1.0.1');
   static const primaryBase = 'https://api.vexostream.bond/api/v1';
   static const fallbackBase = 'https://vexostream.bond/api/v1';
   static String get userAgent => Platform.isAndroid
