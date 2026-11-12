@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 
 globalThis.caches ??= { default: { async match() { return undefined; }, async put() {} } };
 const worker = (await import('../dist/worker.js')).default;
@@ -68,10 +69,12 @@ test('watch page keeps a fluid player and compact controls on phone widths', asy
     ctx
   );
   const html = await response.text();
+  const css = await readFile(new URL('../src/styles/app.css', import.meta.url), 'utf8');
   assert.equal(response.status, 200);
-  assert.ok(html.includes('.watch-grid{width:100%;gap:0}'));
-  assert.ok(html.includes('.stage .vx-player{width:100%;max-width:100vw;aspect-ratio:16/9}'));
-  assert.match(html, /@media\s?\(max-width:359px\)/);
+  assert.ok(html.includes('class="vx-player"'));
+  assert.ok(css.includes('.watch-grid{width:100%;gap:0}'));
+  assert.ok(css.includes('.stage .vx-player{width:100%;max-width:100vw;aspect-ratio:16/9}'));
+  assert.ok(css.includes('@media (max-width:359px)'));
 });
 
 test('app player skips the loading poster without changing standard embeds', async () => {

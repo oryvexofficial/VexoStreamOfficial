@@ -183,7 +183,8 @@ void main() {
         onSignIn: () async { signInOpened = true; },
       ),
     ));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
 
     expect(find.text('You must log in to continue'), findsOneWidget);
     expect(find.text('Log in'), findsOneWidget);

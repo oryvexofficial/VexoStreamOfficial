@@ -562,27 +562,27 @@ class _PlayerPageState extends State<PlayerPage> {
   Widget _unsupportedSource(BuildContext context) => ColoredBox(
         color: Colors.black,
         child: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(24),
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(16),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(Icons.link_off_rounded, size: 42, color: Colors.white70),
-                const SizedBox(height: 14),
+                const Icon(Icons.link_off_rounded, size: 36, color: Colors.white70),
+                const SizedBox(height: 10),
                 Text(
                   'Unsupported video link',
                   textAlign: TextAlign.center,
-                  style: Vx.sans(size: 20, color: Colors.white, weight: FontWeight.w700),
+                  style: Vx.sans(size: 18, color: Colors.white, weight: FontWeight.w700),
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 6),
                 Text(
                   'This link does not match a supported provider video page, so it cannot be opened in the VexoStream player.',
                   textAlign: TextAlign.center,
-                  style: Vx.sans(size: 14, color: Vx.text2),
+                  style: Vx.sans(size: 13, color: Vx.text2),
                 ),
-                const SizedBox(height: 14),
+                const SizedBox(height: 10),
                 OutlinedButton.icon(
-                  onPressed: () => _copy(context, _target, 'Original video link copied'),
+                  onPressed: () => _copy(context, _target, 'Original link copied'),
                   icon: const Icon(Icons.copy_rounded, size: 16),
                   label: const Text('Copy original link'),
                 ),
