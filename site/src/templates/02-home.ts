@@ -181,6 +181,8 @@ function renderModelsHtml(meta, slug = '') {
         '<div class="segmented" id="modelVideoProviders" role="group" aria-label="Video provider"></div>' +
         '</div>' +
         '<div id="modelVideosGrid" class="vgrid" aria-live="polite"></div>' +
+        '<div id="modelVideosMore" hidden style="margin-top:24px;text-align:center">' +
+        '<a class="btn quiet" id="modelVideosMoreBtn" href="/search">Load more</a></div>' +
         '</section>' +
         '</div></section>';
     return renderHead({ meta }) +
@@ -443,6 +445,8 @@ function MODELS_JS(slug) {
     var subEl = document.getElementById('modelVideosSub');
     var provWrap = document.getElementById('modelVideoProviders');
     var vgrid = document.getElementById('modelVideosGrid');
+    var moreWrap = document.getElementById('modelVideosMore');
+    var moreBtn = document.getElementById('modelVideosMoreBtn');
     if (!sec || !vgrid || !window.vxCard) return;
     var modelName = String((m && m.name) || '').trim();
     if (!modelName) return;
@@ -465,6 +469,7 @@ function MODELS_JS(slug) {
       subEl.textContent = 'Loading latest 20 videos for ' + modelName + '\u2026';
       vgrid.innerHTML = window.vxSkeletons ? window.vxSkeletons(8) : '';
       vgrid.setAttribute('aria-busy', 'true');
+      if (moreWrap) moreWrap.hidden = true;
       var collected = [], seen = {};
       function addItems(list){
         var usable = window.vxUsable ? window.vxUsable(list) : (Array.isArray(list) ? list : []);
@@ -499,6 +504,11 @@ function MODELS_JS(slug) {
         var frag = document.createDocumentFragment();
         collected.forEach(function(it){ frag.appendChild(window.vxCard(it)); });
         vgrid.appendChild(frag);
+        if (moreWrap && moreBtn) {
+          moreBtn.href = '/search?q=' + encodeURIComponent(modelName) + '&provider=' + encodeURIComponent(activeId);
+          moreBtn.textContent = 'Load more on ' + pvName;
+          moreWrap.hidden = false;
+        }
       }).catch(function(err){
         if (rid !== videoReq) return;
         subEl.textContent = 'Could not load videos from ' + pvName + '.';

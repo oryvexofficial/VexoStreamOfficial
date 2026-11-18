@@ -8,10 +8,11 @@ import '../widgets/video_card.dart';
 import 'model_profile_data.dart';
 
 class ModelsPage extends StatefulWidget {
-  const ModelsPage({super.key, required this.api, required this.onSignIn, required this.onPlay});
+  const ModelsPage({super.key, required this.api, required this.onSignIn, required this.onPlay, required this.onSearch});
   final VexoApi api;
   final VoidCallback onSignIn;
   final ValueChanged<Map<String, dynamic>> onPlay;
+  final void Function(String query, String provider) onSearch;
 
   @override
   State<ModelsPage> createState() => _ModelsPageState();
@@ -64,7 +65,7 @@ class _ModelsPageState extends State<ModelsPage> {
   void _open(Map<String, dynamic> model) {
     final slug = firstText(model, const ['slug', 'id']);
     if (slug.isEmpty) return;
-    Navigator.of(context).push(MaterialPageRoute(builder: (_) => ModelProfilePage(api: widget.api, slug: slug, initial: model, onPlay: widget.onPlay)));
+    Navigator.of(context).push(MaterialPageRoute(builder: (_) => ModelProfilePage(api: widget.api, slug: slug, initial: model, onPlay: widget.onPlay, onSearch: widget.onSearch)));
   }
 
   @override
@@ -323,11 +324,12 @@ class _ModelCardState extends State<_ModelCard> {
 }
 
 class ModelProfilePage extends StatefulWidget {
-  const ModelProfilePage({super.key, required this.api, required this.slug, required this.initial, required this.onPlay});
+  const ModelProfilePage({super.key, required this.api, required this.slug, required this.initial, required this.onPlay, required this.onSearch});
   final VexoApi api;
   final String slug;
   final Map<String, dynamic> initial;
   final ValueChanged<Map<String, dynamic>> onPlay;
+  final void Function(String query, String provider) onSearch;
 
   @override
   State<ModelProfilePage> createState() => _ModelProfilePageState();
@@ -586,6 +588,19 @@ class _ModelProfilePageState extends State<ModelProfilePage> {
                       )
                     else
                       VideoGrid(api: widget.api, items: _videos, onPlay: widget.onPlay, loading: _videosLoading, skeletons: 8),
+                    if (!_videosLoading && _videos.isNotEmpty) ...[
+                      const SizedBox(height: 24),
+                      Center(
+                        child: OutlinedButton.icon(
+                          onPressed: () {
+                            Navigator.of(context).pop();
+                            widget.onSearch(name, _selectedProvider);
+                          },
+                          icon: const Icon(Icons.search_rounded),
+                          label: Text('Load more on $_selectedProviderName'),
+                        ),
+                      ),
+                    ],
                   ],
                 ]),
     );
