@@ -185,7 +185,7 @@ async function handleAppApiV1(request, url, env, ctx) {
             apiVersion: 1,
             providers,
             defaultProvider: defaultProviderOf(cfg),
-            defaultQuery: cfg.defaultQuery || 'trending',
+            defaultQuery: await resolveActiveDefaultQuery(env, cfg),
             access: { requireLogin: members.requireLogin, allowSignup: members.allowSignup, modelsLogin: members.modelsLogin }
         });
     }
@@ -299,6 +299,10 @@ async function handleAppApiV1(request, url, env, ctx) {
                 const cfg = await getProviderConfig(env, true);
                 Object.assign(out, { defaultProvider: cfg.defaultProvider, defaultQuery: cfg.defaultQuery, lockMessage: cfg.lockMessage, providerOrder: cfg.order, providers: providerList(cfg).map(p => ({ id: p.id, name: p.name, domain: p.domain, mode: p.mode })) });
             }
+            if (adminCan(admin, 'default_search')) {
+                const dsCfg = await getDefaultSearchConfig(env, true);
+                out.defaultSearch = { config: dsCfg, status: resolveDefaultSearchStatus(dsCfg) };
+            }
             if (adminCan(admin, 'backend')) out.backendUrl = await getBackendUrl(env, true);
             if (adminCan(admin, 'users')) out.team = (await listAdminUsers(env) || []).map(t => ({ username: t.username, owner: !!t.owner, permissions: t.permissions, disabled: !!t.disabled, createdBy: t.createdBy, createdAt: t.createdAt, lastLogin: t.lastLogin, legacy: !!t.legacy }));
             if (adminCan(admin, 'social')) {
@@ -348,8 +352,42 @@ async function handleAppApiV1(request, url, env, ctx) {
             }
             return appApiJson({ ok: true });
         }
-        const requiredPermission = { '/admin/team': 'users', '/admin/social': 'social', '/admin/telegram': 'social', '/admin/operations': 'operations', '/admin/live': 'owner' }[path];
+        const requiredPermission = { '/admin/team': 'users', '/admin/social': 'social', '/admin/telegram': 'social', '/admin/operations': 'operations', '/admin/live': 'owner', '/admin/default-search': 'default_search' }[path];
         if (requiredPermission && (requiredPermission === 'owner' ? !admin.owner : !adminCan(admin, requiredPermission))) return appApiJson({ error: 'You do not have permission for this section.', code: 'forbidden' }, 403);
+        if (path === '/admin/default-search') {
+            const action = String(values.action || 'save');
+            const cur = await getDefaultSearchConfig(env, true);
+            const curStatus = resolveDefaultSearchStatus(cur);
+            let next = null;
+            if (action === 'next') {
+                next = { ...cur, currentIndex: cur.names.length ? (curStatus.activeIndex + 1) % cur.names.length : 0, startedAt: Date.now() };
+            } else if (action === 'prev') {
+                next = { ...cur, currentIndex: cur.names.length ? (curStatus.activeIndex - 1 + cur.names.length) % cur.names.length : 0, startedAt: Date.now() };
+            } else if (action === 'restart') {
+                next = { ...cur, currentIndex: 0, startedAt: Date.now() };
+            } else if (action === 'reset_list') {
+                next = normalizeDefaultSearchConfig({ enabled: true, names: DEFAULT_SEARCH_NAMES.slice(), intervalValue: 1, intervalUnit: 'days', currentIndex: 0, startedAt: Date.now() });
+            } else if (action === 'save') {
+                const namesInput = values.names !== undefined ? values.names : values.namesText;
+                const parsedNames = namesInput !== undefined ? parseDefaultSearchNames(namesInput) : cur.names;
+                if (!parsedNames.length) return appApiJson({ error: 'Provide at least one search name.' }, 400);
+                const idx1 = values.currentIndex !== undefined ? Number(values.currentIndex) : (curStatus.activeIndex + 1);
+                const safeIdx = Number.isFinite(idx1) ? Math.max(0, Math.min(parsedNames.length - 1, Math.floor(idx1) - 1)) : 0;
+                next = normalizeDefaultSearchConfig({
+                    enabled: values.enabled !== undefined ? !!values.enabled : cur.enabled,
+                    intervalValue: values.intervalValue !== undefined ? values.intervalValue : cur.intervalValue,
+                    intervalUnit: values.intervalUnit !== undefined ? values.intervalUnit : cur.intervalUnit,
+                    names: parsedNames,
+                    currentIndex: safeIdx,
+                    startedAt: Date.now()
+                });
+            } else {
+                return appApiJson({ error: 'Unknown default-search action.' }, 400);
+            }
+            if (!(await saveDefaultSearchConfig(env, next))) return appApiJson({ error: 'Could not save default search settings.' }, 503);
+            const saved = await getDefaultSearchConfig(env, true);
+            return appApiJson({ ok: true, defaultSearch: { config: saved, status: resolveDefaultSearchStatus(saved) } });
+        }
         if (path === '/admin/team') {
             const action = String(values.action || '');
             let result;
@@ -470,7 +508,8 @@ async function handleAppApiV1(request, url, env, ctx) {
         if (!provider) return lockedJson(cfg, provider);
         if (isProviderHidden(cfg, provider)) return hiddenJson(provider);
         if (isProviderLocked(cfg, provider)) return lockedJson(cfg, provider);
-        const q = String(url.searchParams.get('q') || url.searchParams.get('search') || cfg.defaultQuery || 'trending').trim().slice(0, 100) || cfg.defaultQuery || 'trending';
+        const fallbackQ = await resolveActiveDefaultQuery(env, cfg);
+        const q = String(url.searchParams.get('q') || url.searchParams.get('search') || fallbackQ).trim().slice(0, 100) || fallbackQ;
         const params = { q, provider, page: appApiPageNumber(url.searchParams.get('page')) };
         return forwardToRailway(appApiBackendRequest(request, url, '/api/explore', params), ctx);
     }

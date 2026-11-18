@@ -34,6 +34,27 @@ String modelDetailValue(dynamic value) {
   return value.toString().trim();
 }
 
+/// Automatically infers the possessive pronoun ("Her", "His", or "Their")
+/// from the performer's profile gender metadata.
+String modelPossessivePronoun(Map<String, dynamic> model) {
+  final personal = modelProfileMap(model['personal_details']);
+  final candidates = [
+    modelDetailValue(personal['gender']),
+    modelDetailValue(model['gender']),
+    modelDetailValue(personal['sex']),
+    modelDetailValue(model['sex']),
+  ];
+  final raw = candidates.firstWhere((v) => v.isNotEmpty, orElse: () => '').toLowerCase();
+  if (raw.isEmpty) return 'Their';
+
+  final isFemale = RegExp(r'\b(female|woman|women|girl|mtf|she|her|hers)\b').hasMatch(raw);
+  final isMale = RegExp(r'\b(male|man|men|boy|ftm|he|him|his)\b').hasMatch(raw);
+
+  if (isFemale && !isMale) return 'Her';
+  if (isMale && !isFemale) return 'His';
+  return 'Their';
+}
+
 List<String> modelProfilePhotos(Map<String, dynamic> model) {
   final result = <String>[];
   void add(dynamic value) {

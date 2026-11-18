@@ -19,6 +19,7 @@ class _AdminPageState extends State<AdminPage> {
   static const _sections = <(String, IconData)>[
     ('Overview', Icons.dashboard_outlined),
     ('Providers', Icons.video_library_outlined),
+    ('Default Search', Icons.manage_search_rounded),
     ('Backend', Icons.dns_outlined),
     ('Members', Icons.people_outline_rounded),
     ('Team', Icons.admin_panel_settings_outlined),
@@ -37,6 +38,7 @@ class _AdminPageState extends State<AdminPage> {
     ('member_remove', 'Delete member accounts'),
     ('backend', 'Backend'),
     ('providers', 'Providers'),
+    ('default_search', 'Default Search Explore'),
     ('operations', 'Operations'),
     ('social', 'Social media'),
     ('users', 'Team management'),
@@ -49,6 +51,9 @@ class _AdminPageState extends State<AdminPage> {
   static const _botPlatforms = <String>['telegram', 'discord', 'whatsapp', 'messenger', 'line', 'slack', 'viber', 'other'];
 
   final _query = TextEditingController();
+  final _dsInterval = TextEditingController(text: '1');
+  final _dsCurrentIdx = TextEditingController(text: '1');
+  final _dsNames = TextEditingController();
   final _backend = TextEditingController();
   final _lockMessage = TextEditingController();
   final _newAdminName = TextEditingController();
@@ -82,6 +87,9 @@ class _AdminPageState extends State<AdminPage> {
   bool _telegramConfigured = false;
   String _telegramSource = '';
   String _defaultProvider = '';
+  bool _dsEnabled = true;
+  String _dsUnit = 'days';
+  Map<String, dynamic> _dsStatus = {};
   String _liveMode = 'simulated';
   List<Map<String, dynamic>> _providers = [];
   List<String> _providerOrder = [];
@@ -104,6 +112,9 @@ class _AdminPageState extends State<AdminPage> {
   @override
   void dispose() {
     _query.dispose();
+    _dsInterval.dispose();
+    _dsCurrentIdx.dispose();
+    _dsNames.dispose();
     _backend.dispose();
     _lockMessage.dispose();
     _newAdminName.dispose();
@@ -200,11 +211,45 @@ class _AdminPageState extends State<AdminPage> {
       for (final key in ['min', 'max', 'joinMin', 'joinMax', 'leaveMin', 'leaveMax']) { _setField(_liveFields, key, (liveConfig[key] ?? '').toString()); }
       _liveStats = stats;
       _database = db;
+      _applyDefaultSearchPayload(asMap(data['defaultSearch']));
       if (mounted) setState(() => _loading = false);
     } catch (e) {
       if (mounted) setState(() { _error = e.toString(); _loading = false; });
     }
   }
+
+  void _applyDefaultSearchPayload(Map<String, dynamic> payload) {
+    final cfg = asMap(payload['config']);
+    final status = asMap(payload['status']);
+    if (cfg.isEmpty && status.isEmpty) return;
+    _dsEnabled = cfg['enabled'] != false;
+    _dsInterval.text = (cfg['intervalValue'] ?? 1).toString();
+    final unit = (cfg['intervalUnit'] ?? 'days').toString();
+    _dsUnit = const ['minutes', 'hours', 'days'].contains(unit) ? unit : 'days';
+    final names = asList(cfg['names']).map((e) => e.toString()).where((e) => e.trim().isNotEmpty).toList();
+    _dsNames.text = names.join('\n');
+    final activeIdx = asInt(status['activeIndex']);
+    _dsCurrentIdx.text = '${activeIdx + 1}';
+    _dsStatus = status;
+  }
+
+  Future<void> _defaultSearchAction(String action, String success) => _run(() async {
+    final body = <String, dynamic>{'action': action};
+    if (action == 'save') {
+      final iv = int.tryParse(_dsInterval.text.trim()) ?? 1;
+      final idx = int.tryParse(_dsCurrentIdx.text.trim()) ?? 1;
+      body['enabled'] = _dsEnabled;
+      body['intervalValue'] = iv.clamp(1, 10000);
+      body['intervalUnit'] = _dsUnit;
+      body['currentIndex'] = idx < 1 ? 1 : idx;
+      body['namesText'] = _dsNames.text;
+    }
+    final res = asMap(await _post('/admin/default-search', body));
+    final ds = asMap(res['defaultSearch']);
+    if (ds.isNotEmpty && mounted) {
+      setState(() => _applyDefaultSearchPayload(ds));
+    }
+  }, success);
 
   Future<void> _run(Future<dynamic> Function() action, String success) async {
     setState(() { _saving = true; _error = null; _notice = null; });
@@ -381,14 +426,15 @@ class _AdminPageState extends State<AdminPage> {
   Widget _sectionBody() => switch (_section) {
     0 => _overview(),
     1 => _providersSection(),
-    2 => _backendSection(),
-    3 => _membersSection(),
-    4 => _teamSection(),
-    5 => _socialSection(),
-    6 => _telegramSection(),
-    7 => _liveSection(),
-    8 => _operationsSection(),
-    9 => _linksSection(),
+    2 => _defaultSearchSection(),
+    3 => _backendSection(),
+    4 => _membersSection(),
+    5 => _teamSection(),
+    6 => _socialSection(),
+    7 => _telegramSection(),
+    8 => _liveSection(),
+    9 => _operationsSection(),
+    10 => _linksSection(),
     _ => _accountSection(),
   };
 
@@ -411,14 +457,15 @@ class _AdminPageState extends State<AdminPage> {
     return asList(person['permissions']).every((p) => p != 'users' && _can(p.toString()));
   }
   bool _sectionAllowed(int i) => switch (i) {
-    0 || 9 || 10 => true,
+    0 || 10 || 11 => true,
     1 => _can('providers'),
-    2 => _can('backend'),
-    3 => _can('member_settings') || _can('member_moderation') || _can('member_remove'),
-    4 => _can('users'),
-    5 || 6 => _can('social'),
-    7 => _owner['isOwner'] == true,
-    8 => _can('operations'),
+    2 => _can('default_search'),
+    3 => _can('backend'),
+    4 => _can('member_settings') || _can('member_moderation') || _can('member_remove'),
+    5 => _can('users'),
+    6 || 7 => _can('social'),
+    8 => _owner['isOwner'] == true,
+    9 => _can('operations'),
     _ => false,
   };
   Widget _saveButton(VoidCallback onPressed, {String label = 'Save changes'}) => FilledButton.icon(onPressed: _saving ? null : onPressed, icon: _saving ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.save_outlined), label: Text(_saving ? 'Saving…' : label));
@@ -429,8 +476,8 @@ class _AdminPageState extends State<AdminPage> {
     if (_can('app')) _card('App maintenance', 'Only the app is affected. The website can remain live.', [
       SwitchListTile.adaptive(contentPadding: EdgeInsets.zero, value: _appMaintenance, onChanged: _saving ? null : _setAppMaintenance, title: Text(_appMaintenance ? 'App maintenance is on' : 'App is live'), subtitle: const Text('Admin sign-in remains available.'), secondary: Icon(_appMaintenance ? Icons.build_circle_outlined : Icons.check_circle_outline, color: _appMaintenance ? Vx.amber : Vx.green)),
     ], icon: Icons.phone_android_outlined),
-    if (_can('operations')) _card('Quick health', 'DB binding: ${_database['binding'] == true ? 'connected' : 'missing'} · Settings table: ${_database['table'] == true ? 'ready' : 'needs repair'}', [OutlinedButton.icon(onPressed: _saving ? null : () { setState(() => _section = 8); _operations('health'); }, icon: const Icon(Icons.monitor_heart_outlined), label: const Text('Open operations'))], icon: Icons.health_and_safety_outlined),
-    _card('Admin account', 'Signed in as ${firstText(asMap(_owner), const ['username'])}', [Text('Use Account to change your password.', style: Vx.sans(size: 14, color: Vx.text2)), OutlinedButton(onPressed: () => setState(() => _section = 10), child: const Text('Account and password'))], icon: Icons.verified_user_outlined),
+    if (_can('operations')) _card('Quick health', 'DB binding: ${_database['binding'] == true ? 'connected' : 'missing'} · Settings table: ${_database['table'] == true ? 'ready' : 'needs repair'}', [OutlinedButton.icon(onPressed: _saving ? null : () { setState(() => _section = 9); _operations('health'); }, icon: const Icon(Icons.monitor_heart_outlined), label: const Text('Open operations'))], icon: Icons.health_and_safety_outlined),
+    _card('Admin account', 'Signed in as ${firstText(asMap(_owner), const ['username'])}', [Text('Use Account to change your password.', style: Vx.sans(size: 14, color: Vx.text2)), OutlinedButton(onPressed: () => setState(() => _section = 11), child: const Text('Account and password'))], icon: Icons.verified_user_outlined),
   ]);
 
   Map<String, dynamic> _loadedMembers() => {'total': _memberTotal};
@@ -454,6 +501,100 @@ class _AdminPageState extends State<AdminPage> {
     final item = _providers.cast<Map<String, dynamic>?>().firstWhere((p) => p?['id'] == id, orElse: () => null) ?? <String, dynamic>{};
     final mode = _providerModes[id] ?? 'live';
     return Container(margin: const EdgeInsets.only(bottom: 8), padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6), decoration: Vx.surface(radius: Vx.radiusMd), child: Row(children: [Expanded(child: Text((item['name'] ?? id).toString())), IconButton(onPressed: _saving || index == 0 ? null : () => setState(() { _providerOrder.removeAt(index); _providerOrder.insert(index - 1, id); }), icon: const Icon(Icons.arrow_upward_rounded, size: 18)), IconButton(onPressed: _saving || index == _providerOrder.length - 1 ? null : () => setState(() { _providerOrder.removeAt(index); _providerOrder.insert(index + 1, id); }), icon: const Icon(Icons.arrow_downward_rounded, size: 18)), SizedBox(width: 150, child: DropdownButtonFormField<String>(value: mode, items: const [DropdownMenuItem(value: 'live', child: Text('Live')), DropdownMenuItem(value: 'locked', child: Text('Locked')), DropdownMenuItem(value: 'hidden', child: Text('Hidden'))], onChanged: _saving ? null : (v) { if (v != null) setState(() => _providerModes[id] = v); }))]));
+  }
+
+  String _formatRemaining(int ms) {
+    final s = (ms / 1000).floor().clamp(0, 1 << 30);
+    final d = s ~/ 86400;
+    final h = (s % 86400) ~/ 3600;
+    final m = (s % 3600) ~/ 60;
+    if (d > 0) return '${d}d ${h}h';
+    if (h > 0) return '${h}h ${m}m';
+    return '${m < 1 ? 1 : m}m';
+  }
+
+  Widget _defaultSearchSection() {
+    final activeQuery = (_dsStatus['activeQuery'] ?? 'Abella Danger').toString();
+    final activeIdx = asInt(_dsStatus['activeIndex']) + 1;
+    final total = asInt(_dsStatus['total']);
+    final nextQuery = (_dsStatus['nextQuery'] ?? '').toString();
+    final remainingMs = asInt(_dsStatus['remainingMs']);
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      _card(
+        'Default Search Explore',
+        'Automatically rotates the default search term for both the website and app (1 day per name by default).',
+        [
+          Wrap(spacing: 10, runSpacing: 10, children: [
+            StatusPill(label: _dsEnabled ? 'Auto-rotation on' : 'Paused', color: _dsEnabled ? Vx.green : Vx.amber),
+            StatusPill(label: 'Now: $activeQuery (#$activeIdx/${total > 0 ? total : 100})', color: Vx.blue),
+            if (nextQuery.isNotEmpty)
+              StatusPill(label: 'Next: $nextQuery${_dsEnabled ? ' in ${_formatRemaining(remainingMs)}' : ''}', color: Vx.text2),
+          ]),
+          const SizedBox(height: 16),
+          Wrap(spacing: 8, runSpacing: 8, children: [
+            OutlinedButton.icon(onPressed: _saving ? null : () => _defaultSearchAction('prev', 'Moved to previous default search name.'), icon: const Icon(Icons.chevron_left_rounded), label: const Text('Previous')),
+            OutlinedButton.icon(onPressed: _saving ? null : () => _defaultSearchAction('next', 'Moved to next default search name.'), icon: const Icon(Icons.chevron_right_rounded), label: const Text('Next name')),
+            OutlinedButton(onPressed: _saving ? null : () => _defaultSearchAction('restart', 'Restarted rotation from #1.'), child: const Text('Restart #1')),
+            OutlinedButton(onPressed: _saving ? null : () => _defaultSearchAction('reset_list', 'Restored default 100-name list (1 day interval).'), child: const Text('Reset 100 defaults')),
+          ]),
+          const SizedBox(height: 16),
+          SwitchListTile.adaptive(
+            contentPadding: EdgeInsets.zero,
+            value: _dsEnabled,
+            onChanged: _saving ? null : (v) => setState(() => _dsEnabled = v),
+            title: const Text('Enable automatic rotation'),
+            subtitle: const Text('When disabled, the static default search word in Providers is used.'),
+          ),
+          const SizedBox(height: 10),
+          Row(children: [
+            Expanded(
+              child: TextField(
+                controller: _dsInterval,
+                keyboardType: TextInputType.number,
+                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                decoration: const InputDecoration(labelText: 'Change every', hintText: '1'),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: DropdownButtonFormField<String>(
+                value: _dsUnit,
+                decoration: const InputDecoration(labelText: 'Interval unit'),
+                items: const [
+                  DropdownMenuItem(value: 'minutes', child: Text('Minutes')),
+                  DropdownMenuItem(value: 'hours', child: Text('Hours')),
+                  DropdownMenuItem(value: 'days', child: Text('Days')),
+                ],
+                onChanged: _saving ? null : (v) { if (v != null) setState(() => _dsUnit = v); },
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: TextField(
+                controller: _dsCurrentIdx,
+                keyboardType: TextInputType.number,
+                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                decoration: InputDecoration(labelText: 'Position (1–${total > 0 ? total : 100})'),
+              ),
+            ),
+          ]),
+          const SizedBox(height: 14),
+          TextField(
+            controller: _dsNames,
+            maxLines: 12,
+            minLines: 8,
+            style: Vx.mono(size: 13),
+            decoration: const InputDecoration(
+              labelText: 'Rotation name list (one name per line)',
+              alignLabelWithHint: true,
+            ),
+          ),
+          const SizedBox(height: 16),
+          _saveButton(() => _defaultSearchAction('save', 'Default Search Explore settings saved.'), label: 'Save Default Search'),
+        ],
+        icon: Icons.manage_search_rounded,
+      ),
+    ]);
   }
 
   Widget _backendSection() => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [

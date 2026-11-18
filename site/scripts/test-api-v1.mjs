@@ -15,8 +15,8 @@ test('Worker exposes the app pages through the versioned API', () => {
     "path === '/auth/signup'", "path === '/auth/login'", "path === '/auth/logout'", "path === '/account'",
     "path === '/videos/extract'", "path === '/embed/grant'", "path === '/models'", "path === '/status'", "path === '/social'",
     "path === '/developers'", "path === '/image'", "path === '/check-host/start'", "path === '/check-host/result'",
-    "defaultQuery: cfg.defaultQuery || 'trending'","path === '/admin/team'","path === '/admin/password'",
-    "path === '/admin/members'","path === '/admin/live'","path === '/admin/social'","path === '/admin/telegram'","path === '/admin/operations'",
+    "defaultQuery: await resolveActiveDefaultQuery(env, cfg)","path === '/admin/team'","path === '/admin/password'",
+    "path === '/admin/members'","path === '/admin/live'","path === '/admin/social'","path === '/admin/telegram'","path === '/admin/operations'","path === '/admin/default-search'",
     "action === 'check_channel'", "action === 'repair'"
   ]) assert.ok(api.includes(route), `missing API contract: ${route}`);
   assert.ok(social.includes("action === 'bot_import_tg'"), 'missing Telegram bot import action');

@@ -186,7 +186,8 @@ async function handleRequest(request, env, ctx) {
                 const social = adminCan(user, 'social') ? { cfg: await getSocialConfig(env, true), posts: await listSocialPosts(env, 10) } : null;
                 const live = user.owner ? { cfg: await getLiveConfig(env, true), stats: await liveAdminStats(env) } : null;
                 const members = (adminCan(user, 'member_settings') || adminCan(user, 'member_moderation') || adminCan(user, 'member_remove')) ? { cfg: adminCan(user, 'member_settings') ? await getMembersConfig(env, true) : null, list: (adminCan(user, 'member_moderation') || adminCan(user, 'member_remove')) ? await listMembers(env, 25) : null } : null;
-                return htmlResponse(renderAdminPanelHtml(user, maint, url.searchParams.get('flash') || '', cfg, health, url.searchParams.get('err') === '1', await getBackendUrl(env, true), team, telegram, live, social, members, appMaint), 200, adminHtmlHeaders());
+                const defaultSearch = adminCan(user, 'default_search') ? await (async () => { const dsCfg = await getDefaultSearchConfig(env, true); return { cfg: dsCfg, status: resolveDefaultSearchStatus(dsCfg) }; })() : null;
+                return htmlResponse(renderAdminPanelHtml(user, maint, url.searchParams.get('flash') || '', cfg, health, url.searchParams.get('err') === '1', await getBackendUrl(env, true), team, telegram, live, social, members, appMaint, defaultSearch), 200, adminHtmlHeaders());
             }
             if (path === ADMIN_PATH + '/live/stats' && request.method === 'GET') {
                 const user = await verifyAdminSession(request, env);
@@ -261,6 +262,45 @@ async function handleRequest(request, env, ctx) {
                 const reset = String(form.get('action') || '') === 'reset';
                 const result = await saveBackendUrl(env, reset ? '' : form.get('backend_url'));
                 return back(result.ok ? (result.reset ? 'Backend URL reset to the Worker RAILWAY_URL variable.' : 'Backend URL saved and applied.') : result.error, result.ok, 'backend');
+            }
+            if (path === ADMIN_PATH + '/default-search') {
+                if (!adminCan(user, 'default_search')) return deny('Default Search Explore');
+                const form = await readForm();
+                if (!form) return back('Could not read the Default Search form.', false, 'default-search');
+                const action = String(form.get('action') || 'save');
+                const cur = await getDefaultSearchConfig(env, true);
+                const curStatus = resolveDefaultSearchStatus(cur);
+                let next = null, msg = 'Default Search settings saved.';
+                if (action === 'next') {
+                    next = { ...cur, currentIndex: cur.names.length ? (curStatus.activeIndex + 1) % cur.names.length : 0, startedAt: Date.now() };
+                    msg = 'Moved to next default search name.';
+                } else if (action === 'prev') {
+                    next = { ...cur, currentIndex: cur.names.length ? (curStatus.activeIndex - 1 + cur.names.length) % cur.names.length : 0, startedAt: Date.now() };
+                    msg = 'Moved to previous default search name.';
+                } else if (action === 'restart') {
+                    next = { ...cur, currentIndex: 0, startedAt: Date.now() };
+                    msg = 'Restarted rotation from #1.';
+                } else if (action === 'reset_list') {
+                    next = normalizeDefaultSearchConfig({ enabled: true, names: DEFAULT_SEARCH_NAMES.slice(), intervalValue: 1, intervalUnit: 'days', currentIndex: 0, startedAt: Date.now() });
+                    msg = 'Restored default 100-name list (1 day interval).';
+                } else if (action === 'save') {
+                    const parsedNames = parseDefaultSearchNames(form.get('names_text'));
+                    if (!parsedNames.length) return back('Provide at least one name in the list.', false, 'default-search');
+                    const idx1 = parseInt(String(form.get('current_index_1') || '1'), 10);
+                    const safeIdx = Number.isFinite(idx1) ? Math.max(0, Math.min(parsedNames.length - 1, idx1 - 1)) : 0;
+                    next = normalizeDefaultSearchConfig({
+                        enabled: String(form.get('enabled') || '1') === '1',
+                        intervalValue: form.get('interval_value'),
+                        intervalUnit: form.get('interval_unit'),
+                        names: parsedNames,
+                        currentIndex: safeIdx,
+                        startedAt: Date.now()
+                    });
+                } else {
+                    return redirect(ADMIN_PATH + '#default-search');
+                }
+                const ok = await saveDefaultSearchConfig(env, next);
+                return back(ok ? msg : 'Could not save Default Search settings. ' + (__dbError || 'D1 write error.'), ok, 'default-search');
             }
             if (path === ADMIN_PATH + '/providers') {
                 if (!adminCan(user, 'providers')) return deny('providers');
@@ -520,7 +560,9 @@ async function handleRequest(request, env, ctx) {
             if (op) return redirect('/browse/' + encodeURIComponent(op) + (opg > 1 ? '?page=' + opg : ''));
             if (path === '/index.html') return new Response(null, { status: 301, headers: { 'Location': '/', 'Cache-Control': 'public, max-age=86400' } });
             const meta = buildSocialCardMetaTags({ title: 'VexoStream | Ad-Free HD Video Player (18+)', description: SEO_DEFAULT_DESC, url: '/', jsonld: seoHomeJsonLd() });
-            return htmlResponse(renderHomeHtml(meta, await getProviderConfig(env, true)), 200, { ...SECURE_HTML_HEADERS, 'Cache-Control': 'no-store' });
+            const homeCfg = await getProviderConfig(env, true);
+            const activeQ = await resolveActiveDefaultQuery(env, homeCfg);
+            return htmlResponse(renderHomeHtml(meta, { ...homeCfg, defaultQuery: activeQ }), 200, { ...SECURE_HTML_HEADERS, 'Cache-Control': 'no-store' });
         }
 
         // ---------------------------------------------------------------- browse / search / developers
@@ -529,7 +571,7 @@ async function handleRequest(request, env, ctx) {
             const cfg = await getProviderConfig(env, true);
             const def = defaultProviderOf(cfg);
             const meta = buildSocialCardMetaTags({ title: 'Browse Videos | VexoStream', description: 'Browse every video library on VexoStream in one clean, ad-free HD player.', url: '/browse' });
-            if (!def) return htmlResponse(renderCatalogHtml(meta, cfg, { kind: 'browse', provider: '', page: 1 }), 200, { ...SECURE_HTML_HEADERS, 'Cache-Control': 'no-store' });
+            if (!def) return htmlResponse(renderCatalogHtml(meta, { ...cfg, defaultQuery: await resolveActiveDefaultQuery(env, cfg) }, { kind: 'browse', provider: '', page: 1 }), 200, { ...SECURE_HTML_HEADERS, 'Cache-Control': 'no-store' });
             return redirect('/browse/' + def + (pageNum() > 1 ? '?page=' + pageNum() : ''));
         }
         if (path.startsWith('/browse/')) {
@@ -546,7 +588,7 @@ async function handleRequest(request, env, ctx) {
                 url: bUrl,
                 jsonld: seoBreadcrumbs([['VexoStream', '/'], ['Browse', '/browse'], [providerName(id), '/browse/' + id]])
             });
-            return htmlResponse(renderCatalogHtml(meta, cfg, { kind: 'browse', provider: id, page: pageNum() }), 200, { ...SECURE_HTML_HEADERS, 'Cache-Control': 'no-store' });
+            return htmlResponse(renderCatalogHtml(meta, { ...cfg, defaultQuery: await resolveActiveDefaultQuery(env, cfg) }, { kind: 'browse', provider: id, page: pageNum() }), 200, { ...SECURE_HTML_HEADERS, 'Cache-Control': 'no-store' });
         }
         if (path === '/search' || path === '/search/') {
             const cfg = await getProviderConfig(env, true);
@@ -555,7 +597,7 @@ async function handleRequest(request, env, ctx) {
             if (!browseProviders(cfg).some(p => p.id === pv)) pv = defaultProviderOf(cfg);
             // Internal search results stay out of Google (thin/duplicate pages), links are still followed.
             const meta = buildSocialCardMetaTags({ title: (q ? q + ' | ' : '') + 'Search | VexoStream', description: q ? 'Results for ' + q + ' on VexoStream.' : 'Search the VexoStream catalogue.', url: '/search', robots: SEO_NOINDEX });
-            return htmlResponse(renderCatalogHtml(meta, cfg, { kind: 'search', provider: pv, q, page: pageNum() }), 200, { ...SECURE_HTML_HEADERS, 'Cache-Control': 'no-store' });
+            return htmlResponse(renderCatalogHtml(meta, { ...cfg, defaultQuery: await resolveActiveDefaultQuery(env, cfg) }, { kind: 'search', provider: pv, q, page: pageNum() }), 200, { ...SECURE_HTML_HEADERS, 'Cache-Control': 'no-store' });
         }
         if (path === '/developers' || path === '/developers/') {
             const meta = buildSocialCardMetaTags({ title: 'Embed the VexoStream Player | Developers', description: 'Embed the ad-free VexoStream HD player on any website with one line of code. Responsive, HLS and MP4, every quality.', url: '/developers', jsonld: seoBreadcrumbs([['VexoStream', '/'], ['Developers', '/developers']]) });

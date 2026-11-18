@@ -768,7 +768,7 @@ class _VexoShellState extends State<VexoShell> with WidgetsBindingObserver {
   Widget _body() => switch (_page) {
         _Page.home => HomePage(key: ValueKey('home-$_homeKey'), api: widget.api, liveViewers: _liveViewers, onPlay: _openPlayer, onBrowse: (p) => _browse(p), onSearch: (q, p) => _browse(p, query: q)),
         _Page.browse => CatalogPage(key: ValueKey('browse-$_browseKey'), api: widget.api, onPlay: _openPlayer, initialQuery: _query, initialProvider: _provider),
-        _Page.models => ModelsPage(api: widget.api, onSignIn: () => _openAuth()),
+        _Page.models => ModelsPage(api: widget.api, onSignIn: () => _openAuth(), onPlay: _openPlayer),
         _Page.social => SocialPage(api: widget.api),
         _Page.developers => _isAdmin
             ? DevelopersPage(api: widget.api)

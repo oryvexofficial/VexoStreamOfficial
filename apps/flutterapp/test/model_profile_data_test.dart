@@ -59,4 +59,14 @@ void main() {
     expect(modelProfileDetails(model, 'personal_details')['languages'], 'French');
     expect(modelProfileDetails(model, 'physical_attributes'), isEmpty);
   });
+
+  test('detects Her, His, and Their pronouns automatically from gender metadata', () {
+    expect(modelPossessivePronoun({'personal_details': {'gender': 'Female'}}), 'Her');
+    expect(modelPossessivePronoun({'personal_details': {'gender': 'Male'}}), 'His');
+    expect(modelPossessivePronoun({'gender': 'Trans Female'}), 'Her');
+    expect(modelPossessivePronoun({'gender': 'Trans Male'}), 'His');
+    expect(modelPossessivePronoun({'gender': 'Female,Male'}), 'Their');
+    expect(modelPossessivePronoun({'gender': 'Non-binary'}), 'Their');
+    expect(modelPossessivePronoun({}), 'Their');
+  });
 }

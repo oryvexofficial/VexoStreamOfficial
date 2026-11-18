@@ -1,13 +1,17 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../api/vexo_api.dart';
 import '../widgets/vexo_theme.dart';
+import '../widgets/video_card.dart';
 import 'model_profile_data.dart';
 
 class ModelsPage extends StatefulWidget {
-  const ModelsPage({super.key, required this.api, required this.onSignIn});
+  const ModelsPage({super.key, required this.api, required this.onSignIn, required this.onPlay});
   final VexoApi api;
   final VoidCallback onSignIn;
+  final ValueChanged<Map<String, dynamic>> onPlay;
 
   @override
   State<ModelsPage> createState() => _ModelsPageState();
@@ -60,7 +64,7 @@ class _ModelsPageState extends State<ModelsPage> {
   void _open(Map<String, dynamic> model) {
     final slug = firstText(model, const ['slug', 'id']);
     if (slug.isEmpty) return;
-    Navigator.of(context).push(MaterialPageRoute(builder: (_) => ModelProfilePage(api: widget.api, slug: slug, initial: model)));
+    Navigator.of(context).push(MaterialPageRoute(builder: (_) => ModelProfilePage(api: widget.api, slug: slug, initial: model, onPlay: widget.onPlay)));
   }
 
   @override
@@ -319,10 +323,11 @@ class _ModelCardState extends State<_ModelCard> {
 }
 
 class ModelProfilePage extends StatefulWidget {
-  const ModelProfilePage({super.key, required this.api, required this.slug, required this.initial});
+  const ModelProfilePage({super.key, required this.api, required this.slug, required this.initial, required this.onPlay});
   final VexoApi api;
   final String slug;
   final Map<String, dynamic> initial;
+  final ValueChanged<Map<String, dynamic>> onPlay;
 
   @override
   State<ModelProfilePage> createState() => _ModelProfilePageState();
@@ -333,6 +338,12 @@ class _ModelProfilePageState extends State<ModelProfilePage> {
   bool _loading = true;
   String? _error;
   int _photo = 0;
+  List<Map<String, dynamic>> _providers = [];
+  String _selectedProvider = '';
+  List<Map<String, dynamic>> _videos = [];
+  bool _videosLoading = true;
+  String? _videosError;
+  int _videoReqId = 0;
 
   @override
   void initState() {
@@ -343,12 +354,33 @@ class _ModelProfilePageState extends State<ModelProfilePage> {
   Future<void> _load() async {
     if (mounted) setState(() { _loading = true; _error = null; });
     try {
-      final result = await widget.api.get('/models/${Uri.encodeComponent(widget.slug)}', authenticated: true);
-      if (mounted) setState(() {
+      final results = await Future.wait<dynamic>([
+        widget.api.get('/models/${Uri.encodeComponent(widget.slug)}', authenticated: true),
+        widget.api.get('/config').catchError((_) => null),
+      ]);
+      final result = results[0];
+      final config = asMap(results[1]);
+      final providers = asList(config['providers']).map(asMap).where((p) => p['available'] == true).toList();
+      var selected = _selectedProvider;
+      if (selected.isEmpty || !providers.any((p) => (p['id'] ?? '').toString() == selected)) {
+        final def = (config['defaultProvider'] ?? '').toString();
+        if (providers.any((p) => (p['id'] ?? '').toString() == def)) {
+          selected = def;
+        } else if (providers.isNotEmpty) {
+          selected = (providers.first['id'] ?? '').toString();
+        } else {
+          selected = '';
+        }
+      }
+      if (!mounted) return;
+      setState(() {
         _model = {...widget.initial, ...unwrapModelProfile(result)};
         _photo = 0;
+        _providers = providers;
+        _selectedProvider = selected;
         _loading = false;
       });
+      unawaited(_loadVideos());
     } catch (e) {
       if (mounted) {
         setState(() {
@@ -357,6 +389,73 @@ class _ModelProfilePageState extends State<ModelProfilePage> {
         });
       }
     }
+  }
+
+  Future<void> _loadVideos() async {
+    final provider = _selectedProvider;
+    final modelName = firstText(_model, const ['name', 'title']).trim();
+    if (provider.isEmpty || modelName.isEmpty) {
+      if (mounted) {
+        setState(() {
+          _videos = [];
+          _videosLoading = false;
+          _videosError = null;
+        });
+      }
+      return;
+    }
+    final reqId = ++_videoReqId;
+    if (mounted) {
+      setState(() {
+        _videosLoading = true;
+        _videosError = null;
+      });
+    }
+    try {
+      final collected = <Map<String, dynamic>>[];
+      final seenUrls = <String>{};
+      void addBatch(dynamic payload) {
+        for (final item in videoItems(payload)) {
+          final target = videoTarget(item);
+          if (target.isEmpty || !seenUrls.add(target)) continue;
+          final normalized = Map<String, dynamic>.from(item);
+          if (firstText(normalized, const ['provider', 'source']).isEmpty) {
+            normalized['provider'] = provider;
+          }
+          collected.add(normalized);
+          if (collected.length >= 20) break;
+        }
+      }
+
+      final page1 = await widget.api.get('/catalog', query: {'provider': provider, 'q': modelName, 'page': 1});
+      addBatch(page1);
+      if (collected.isNotEmpty && collected.length < 20) {
+        try {
+          final page2 = await widget.api.get('/catalog', query: {'provider': provider, 'q': modelName, 'page': 2});
+          addBatch(page2);
+        } catch (_) {}
+      }
+      if (!mounted || reqId != _videoReqId) return;
+      setState(() {
+        _videos = collected;
+        _videosLoading = false;
+      });
+    } catch (e) {
+      if (!mounted || reqId != _videoReqId) return;
+      setState(() {
+        _videosError = e.toString();
+        _videosLoading = false;
+      });
+    }
+  }
+
+  String get _selectedProviderName {
+    for (final p in _providers) {
+      if ((p['id'] ?? '').toString() == _selectedProvider) {
+        return (p['name'] ?? _selectedProvider).toString();
+      }
+    }
+    return _selectedProvider.isEmpty ? 'VexoStream' : _selectedProvider;
   }
 
   List<String> get _photos {
@@ -448,6 +547,46 @@ class _ModelProfilePageState extends State<ModelProfilePage> {
                     if (!wide) return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [gallery, const SizedBox(height: 28), info]);
                     return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [SizedBox(width: 380, child: gallery), const SizedBox(width: 40), Expanded(child: info)]);
                   }),
+                  if (_providers.isNotEmpty) ...[
+                    const SizedBox(height: 44),
+                    const Divider(height: 1),
+                    const SizedBox(height: 32),
+                    PageHeading(
+                      kicker: 'Videos',
+                      title: '${modelPossessivePronoun(_model)} videos on $_selectedProviderName',
+                      subtitle: _videosLoading
+                          ? 'Loading latest 20 videos for $name…'
+                          : 'Latest ${_videos.length} videos for $name on $_selectedProviderName',
+                      large: false,
+                    ),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: PillTabs<String>(
+                        items: [for (final p in _providers) ((p['id'] ?? '').toString(), (p['name'] ?? '').toString())],
+                        value: _selectedProvider,
+                        iconFor: (id) => ProviderIcon(id: id, name: id, size: 22),
+                        onChanged: (id) {
+                          if (id == _selectedProvider) return;
+                          setState(() => _selectedProvider = id);
+                          _loadVideos();
+                        },
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    if (_videosError != null)
+                      SizedBox(height: 260, child: ErrorPanel(message: _videosError!, onRetry: _loadVideos))
+                    else if (!_videosLoading && _videos.isEmpty)
+                      SizedBox(
+                        height: 240,
+                        child: ErrorPanel(
+                          title: 'No videos found.',
+                          message: 'No recent videos for $name on $_selectedProviderName.',
+                          icon: Icons.video_library_outlined,
+                        ),
+                      )
+                    else
+                      VideoGrid(api: widget.api, items: _videos, onPlay: widget.onPlay, loading: _videosLoading, skeletons: 8),
+                  ],
                 ]),
     );
   }

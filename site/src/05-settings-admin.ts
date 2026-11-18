@@ -356,6 +356,216 @@ async function saveProviderConfig(env, cfg) {
     return ok;
 }
 
+
+const DEFAULT_SEARCH_NAMES = [
+    "Abella Danger",
+    "Angela White",
+    "Mia Malkova",
+    "Riley Reid",
+    "Lana Rhoades",
+    "Eva Elfie",
+    "Adriana Chechik",
+    "Brandi Love",
+    "Mia Khalifa",
+    "Cory Chase",
+    "Kendra Lust",
+    "Sweetie Fox",
+    "Alexis Texas",
+    "Lisa Ann",
+    "Dani Daniels",
+    "Asa Akira",
+    "Luna Star",
+    "Alexis Fawx",
+    "Lauren Phillips",
+    "Sasha Grey",
+    "Sunny Leone",
+    "Rae Lil Black",
+    "Gina Valentina",
+    "Nicole Kitt",
+    "Skylar Vox",
+    "Autumn Falls",
+    "Gabbie Carter",
+    "Blake Blossom",
+    "Gianna Michaels",
+    "Cherie DeVille",
+    "Eliza Ibarra",
+    "Jia Lissa",
+    "Emily Willis",
+    "Lena Paul",
+    "Madison Ivy",
+    "Natasha Nice",
+    "Nicole Aniston",
+    "Veronica Rodriguez",
+    "Sara Jay",
+    "Ava Addams",
+    "Valentina Nappi",
+    "Kelsi Monroe",
+    "Little Caprice",
+    "Liya Silver",
+    "Comatozze",
+    "Hazel Moore",
+    "Leah Gotti",
+    "Elena Koshka",
+    "Anissa Kate",
+    "Eva Lovia",
+    "Darcie Dolce",
+    "Kenzie Reeves",
+    "Elsa Jean",
+    "Violet Myers",
+    "Alina Lopez",
+    "Sky Bri",
+    "Jane Wilde",
+    "Aidra Fox",
+    "Karlee Grey",
+    "Kendra Spade",
+    "Rachael Cavalli",
+    "Janice Griffith",
+    "Tori Black",
+    "Remy LaCroix",
+    "Naomi Swann",
+    "Kayley Gunner",
+    "Melody Marks",
+    "Stacy Cruz",
+    "Sybil A",
+    "Nancy Ace",
+    "Agatha Vega",
+    "Bonnie Rotten",
+    "Skin Diamond",
+    "Mia Melano",
+    "Keisha Grey",
+    "Peta Jensen",
+    "Kendra Sunderland",
+    "August Ames",
+    "Haley Reed",
+    "Savannah Bond",
+    "Kiara Cole",
+    "Kyler Quinn",
+    "Luna Okko",
+    "Christy Mack",
+    "Hitomi Tanaka",
+    "Anri Okita",
+    "Eimi Fukada",
+    "Yua Mikami",
+    "Ai Uehara",
+    "Julia Ann",
+    "Phoenix Marie",
+    "Bridgette B",
+    "Nikki Benz",
+    "Sophie Dee",
+    "Kagney Linn Karter",
+    "Esperanza Gomez",
+    "Rebel Lynn",
+    "Ariella Ferrera",
+    "Romi Rain",
+    "Stoya"
+];
+const DEFAULT_SEARCH_UNITS = ['minutes', 'hours', 'days'];
+const DEFAULT_SEARCH_UNIT_MS = { minutes: 60000, hours: 3600000, days: 86400000 };
+const DEFAULT_SEARCH_DEFAULT_ANCHOR = Date.UTC(2026, 0, 1, 0, 0, 0);
+let __ds = { at: 0, cfg: null };
+
+function parseDefaultSearchNames(input) {
+    const rawList = Array.isArray(input)
+        ? input
+        : String(input || '').split(/\r?\n|,/);
+    const out = [];
+    const seen = new Set();
+    for (const item of rawList) {
+        const clean = String(item == null ? '' : item).replace(/[-\u001f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 100);
+        if (!clean) continue;
+        const key = clean.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push(clean);
+        if (out.length >= 500) break;
+    }
+    return out;
+}
+
+function normalizeDefaultSearchConfig(raw) {
+    const src = raw && typeof raw === 'object' ? raw : {};
+    const hasNames = Array.isArray(src.names) || typeof src.names === 'string';
+    const parsedNames = hasNames ? parseDefaultSearchNames(src.names) : DEFAULT_SEARCH_NAMES.slice();
+    const names = parsedNames.length ? parsedNames : DEFAULT_SEARCH_NAMES.slice();
+    const enabled = src.enabled === undefined ? true : !!src.enabled;
+    const rawVal = parseInt(String(src.intervalValue ?? 1), 10);
+    const intervalValue = Number.isFinite(rawVal) ? Math.max(1, Math.min(10000, rawVal)) : 1;
+    const rawUnit = String(src.intervalUnit || 'days').trim().toLowerCase();
+    const intervalUnit = DEFAULT_SEARCH_UNITS.includes(rawUnit) ? rawUnit : 'days';
+    const rawIdx = parseInt(String(src.currentIndex ?? 0), 10);
+    const currentIndex = names.length ? (((Number.isFinite(rawIdx) ? rawIdx : 0) % names.length) + names.length) % names.length : 0;
+    const rawStarted = Number(src.startedAt || 0);
+    const startedAt = Number.isFinite(rawStarted) && rawStarted > 0 ? rawStarted : DEFAULT_SEARCH_DEFAULT_ANCHOR;
+    return { enabled, names, intervalValue, intervalUnit, currentIndex, startedAt };
+}
+
+async function getDefaultSearchConfig(env, fresh = false) {
+    if (!fresh && __ds.cfg && Date.now() - __ds.at < 15000) return __ds.cfg;
+    let raw = null;
+    try { raw = JSON.parse(await dbGetSetting(env, 'default_search_config', 'null')); } catch (_) {}
+    const cfg = normalizeDefaultSearchConfig(raw);
+    __ds = { at: Date.now(), cfg };
+    return cfg;
+}
+
+async function saveDefaultSearchConfig(env, cfg) {
+    const clean = normalizeDefaultSearchConfig(cfg);
+    const ok = await dbSetSetting(env, 'default_search_config', JSON.stringify(clean));
+    if (ok) __ds = { at: Date.now(), cfg: clean };
+    return ok;
+}
+
+function resolveDefaultSearchStatus(dsCfg, now = Date.now()) {
+    const cfg = normalizeDefaultSearchConfig(dsCfg);
+    const total = cfg.names.length;
+    const unitMs = DEFAULT_SEARCH_UNIT_MS[cfg.intervalUnit] || 86400000;
+    const intervalMs = cfg.intervalValue * unitMs;
+    if (!total) {
+        return { enabled: cfg.enabled, activeQuery: 'trending', activeIndex: 0, total: 0, nextQuery: 'trending', nextIndex: 0, intervalMs, nextChangeAt: now + intervalMs, remainingMs: intervalMs };
+    }
+    const elapsed = Math.max(0, now - cfg.startedAt);
+    const steps = cfg.enabled ? Math.floor(elapsed / intervalMs) : 0;
+    const activeIndex = (cfg.currentIndex + steps) % total;
+    const nextIndex = (activeIndex + 1) % total;
+    const nextChangeAt = cfg.enabled ? (cfg.startedAt + (steps + 1) * intervalMs) : 0;
+    const remainingMs = cfg.enabled ? Math.max(0, nextChangeAt - now) : 0;
+    return {
+        enabled: cfg.enabled,
+        activeQuery: cfg.names[activeIndex],
+        activeIndex,
+        total,
+        nextQuery: cfg.names[nextIndex],
+        nextIndex,
+        intervalMs,
+        nextChangeAt,
+        remainingMs
+    };
+}
+
+async function resolveActiveDefaultQuery(env, providerCfg = null, fresh = false) {
+    if (!fresh && __ds.cfg) {
+        if (__ds.cfg.enabled && __ds.cfg.names.length) return resolveDefaultSearchStatus(__ds.cfg).activeQuery;
+        return (providerCfg && providerCfg.defaultQuery) || 'trending';
+    }
+    const rawText = await dbGetSetting(env, 'default_search_config', '');
+    if (!rawText) {
+        return (providerCfg && providerCfg.defaultQuery) || 'trending';
+    }
+    const ds = await getDefaultSearchConfig(env, fresh);
+    if (ds.enabled && ds.names.length) return resolveDefaultSearchStatus(ds).activeQuery;
+    return (providerCfg && providerCfg.defaultQuery) || 'trending';
+}
+
+function formatDurationShort(ms) {
+    const s = Math.max(0, Math.floor(ms / 1000));
+    const d = Math.floor(s / 86400);
+    const h = Math.floor((s % 86400) / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    if (d > 0) return d + 'd ' + h + 'h';
+    if (h > 0) return h + 'h ' + m + 'm';
+    return Math.max(1, m) + 'm';
+}
+
 function providerList(cfg) {
     return cfg.order.map(id => PROVIDERS.find(p => p.id === id)).filter(Boolean).map(p => ({ ...p, mode: cfg.modes[p.id] || 'live' }));
 }
@@ -769,6 +979,34 @@ function renderProvidersCard(cfg) {
         '</form></section>';
 }
 
+
+function renderDefaultSearchCard(dsCfg, status) {
+    const unitOpts = [['minutes', 'Minutes'], ['hours', 'Hours'], ['days', 'Days']]
+        .map(([val, lbl]) => '<option value="' + val + '"' + (dsCfg.intervalUnit === val ? ' selected' : '') + '>' + lbl + '</option>')
+        .join('');
+    const act = (action, label, cls = 'quiet') => '<form method="POST" action="' + ADMIN_PATH + '/default-search" style="display:inline"><input type="hidden" name="action" value="' + action + '"><button class="btn ' + cls + ' sm" type="submit">' + label + '</button></form>';
+    return '<section class="card span" id="default-search-card">' +
+        '<div class="card-head"><div><h2>Default Search Explore</h2><p>Automatically rotates the default search term for both the website and app.</p>' +
+        '<div class="health">' +
+        '<span class="hpill"><i style="--c:' + (dsCfg.enabled ? 'var(--green)' : 'var(--amber)') + '"></i>' + (dsCfg.enabled ? 'Auto-rotation on' : 'Paused') + '</span>' +
+        '<span class="hpill"><i></i>Now: <b>' + escapeHtml(status.activeQuery) + '</b> (#' + (status.activeIndex + 1) + '/' + status.total + ')</span>' +
+        '<span class="hpill"><i></i>Next: ' + escapeHtml(status.nextQuery) + (dsCfg.enabled ? ' in ' + formatDurationShort(status.remainingMs) : '') + '</span>' +
+        '</div></div>' +
+        '<div class="links">' + act('prev', '&lsaquo; Prev') + act('next', 'Next name &rsaquo;') + act('restart', 'Restart #1') + act('reset_list', 'Reset 100 defaults') + '</div></div>' +
+        '<form method="POST" action="' + ADMIN_PATH + '/default-search" class="backend-form">' +
+        '<input type="hidden" name="action" value="save">' +
+        '<div class="prov-opts">' +
+        '<label class="opt"><span>Auto-rotation</span><select name="enabled"><option value="1"' + (dsCfg.enabled ? ' selected' : '') + '>Enabled</option><option value="0"' + (!dsCfg.enabled ? ' selected' : '') + '>Disabled (use static default)</option></select></label>' +
+        '<label class="opt"><span>Change every</span><input type="number" name="interval_value" min="1" max="10000" required value="' + dsCfg.intervalValue + '"></label>' +
+        '<label class="opt"><span>Interval unit</span><select name="interval_unit">' + unitOpts + '</select></label>' +
+        '<label class="opt"><span>Current position (1&ndash;' + Math.max(1, status.total) + ')</span><input type="number" name="current_index_1" min="1" max="' + Math.max(1, status.total) + '" value="' + (status.activeIndex + 1) + '"></label>' +
+        '<label class="opt span"><span>Rotation name list (one name per line, ' + status.total + ' names)</span><textarea name="names_text" rows="12" style="font-family:var(--font-mono);font-size:13px">' + escapeHtml(dsCfg.names.join('\n')) + '</textarea></label>' +
+        '</div>' +
+        '<div class="prov-foot"><p class="prov-legend">Default is <b>1 day</b> per name. Saving updates the active term immediately across the site and app.</p>' +
+        '<div class="actions"><button class="btn sm" type="submit">Save Default Search</button></div></div>' +
+        '</form></section>';
+}
+
 function renderBackendCard(backendUrl) {
     return '<section class="card span" id="backend-card"><div class="card-head"><div><h2>Backend URL</h2><p>Choose the API server used for search, video extraction, and stream proxying. Saved in D1 and applied immediately (other edge instances refresh within 20 seconds).</p></div><span class="hpill"><i></i>HTTP + HTTPS</span></div>' +
         '<form method="POST" action="' + ADMIN_PATH + '/backend" id="backendForm" class="backend-form">' +
@@ -839,7 +1077,7 @@ const ADMIN_JS = String.raw`
 })();
 `;
 
-function renderAdminPanelHtml(user, maintenanceOn, flashMsg, cfg = normalizeProviderConfig(null), health = { binding: true, table: true, write: null, error: '' }, flashErr = false, backendUrl = BACKEND_URL_BASE, team = null, telegram = null, live = null, social = null, members = null, appMaintenanceOn = false) {
+function renderAdminPanelHtml(user, maintenanceOn, flashMsg, cfg = normalizeProviderConfig(null), health = { binding: true, table: true, write: null, error: '' }, flashErr = false, backendUrl = BACKEND_URL_BASE, team = null, telegram = null, live = null, social = null, members = null, appMaintenanceOn = false, defaultSearch = null) {
     const section = (id, title, detail, cards) => '<section class="admin-section" id="' + id + '"><div class="section-head"><div><h2>' + title + '</h2><p>' + detail + '</p></div></div><div class="cards">' + cards + '</div></section>';
     const can = (perm) => adminCan(user, perm);
     const siteMode = '<section class="card span"><div class="card-kicker">PUBLIC SITE</div><h2>Site mode</h2><p>Website maintenance is independent of the app. Signed-in admins retain access.</p>' +
@@ -865,6 +1103,7 @@ function renderAdminPanelHtml(user, maintenanceOn, flashMsg, cfg = normalizeProv
     if (members) add('members', 'Members', 'Members', 'Visitor accounts and “log in to watch”.', renderMembersCard(members.cfg, members.list, user));
     if (can('backend')) add('backend', 'Backend', 'Backend', 'Set the API server this Worker forwards requests to.', renderBackendCard(backendUrl));
     if (can('providers')) add('providers', 'Providers', 'Providers', 'Choose what visitors can browse and set the default search experience.', renderProvidersCard(cfg));
+    if (can('default_search')) { const dsCfg = (defaultSearch && defaultSearch.cfg) || normalizeDefaultSearchConfig(null); const dsStatus = (defaultSearch && defaultSearch.status) || resolveDefaultSearchStatus(dsCfg); add('default-search', 'Default Search', 'Default Search Explore', 'Manage the rotating default search names and change interval for the site and app.', renderDefaultSearchCard(dsCfg, dsStatus)); }
     if (user.owner && live) add('live', 'Live viewers', 'Live viewers', 'See real traffic and control the public watching-now counter.', renderLiveCard(live.cfg, live.stats));
     if (can('social')) add('social', 'Social media', 'Social media', 'Telegram bot, Telegram channel, your bots and social accounts.', renderTelegramCard(telegram) + renderSocialCards(social && social.cfg, social && social.posts));
     if (can('operations')) add('operations', 'Operations', 'Operations', 'Keep the database healthy.', ops);

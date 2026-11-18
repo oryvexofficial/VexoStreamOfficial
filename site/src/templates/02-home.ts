@@ -172,13 +172,23 @@ function renderModelsHtml(meta, slug = '') {
         '<div class="mthumbs" id="mThumbs" role="group" aria-label="Photos"></div></div>' +
         '<div><div class="mhead"><h1 class="headline" id="modelName">Loading&hellip;</h1><p class="mcountry" id="modelCountry"></p></div>' +
         '<div class="mdetails" id="modelDetails" aria-live="polite"></div></div>' +
-        '</div></div></section>';
+        '</div>' +
+        '<section class="mvideos" id="modelVideosSec" hidden style="margin-top:42px;padding-top:32px;border-top:1px solid var(--line)">' +
+        '<div style="display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:14px;margin-bottom:18px">' +
+        '<div><p class="podium-kicker" style="margin:0 0 6px">Videos</p>' +
+        '<h2 id="modelVideosTitle" style="margin:0;font:700 clamp(22px,2.8vw,30px)/1.15 var(--font-sans);letter-spacing:-.03em">Videos</h2>' +
+        '<p id="modelVideosSub" style="margin:6px 0 0;color:var(--text-2);font:400 14px/1.4 var(--font-sans)"></p></div>' +
+        '<div class="segmented" id="modelVideoProviders" role="group" aria-label="Video provider"></div>' +
+        '</div>' +
+        '<div id="modelVideosGrid" class="vgrid" aria-live="polite"></div>' +
+        '</section>' +
+        '</div></section>';
     return renderHead({ meta }) +
         '<body>' + renderAgeGate() + renderNav('models') +
         '<main class="page">' + (cleanSlug ? profileBody : listBody) + '</main>' +
         renderFooter() +
         clientConfigScript({}) +
-        '<script>' + COMMON_JS + MODELS_JS(cleanSlug) + '</script></body></html>';
+        '<script>' + COMMON_JS + (cleanSlug ? CARD_JS : '') + MODELS_JS(cleanSlug) + '</script></body></html>';
 }
 
 function MODELS_JS(slug) {
@@ -410,12 +420,114 @@ function MODELS_JS(slug) {
         });
       }
       show(0);
+      initModelVideos(m);
     })
     .catch(function(err){
       nameEl.textContent = 'Profile unavailable';
       details.innerHTML = statusHtml('Couldn\u2019t load this profile.', (err && err.message) || 'Try again in a moment.');
     })
     .then(function(){ if (window.TopLoader) TopLoader.done(); });
+  function modelPronoun(m){
+    var p = (m && m.personal_details) || {};
+    var raw = String(p.gender || (m && m.gender) || p.sex || (m && m.sex) || '').toLowerCase().trim();
+    if (!raw) return 'Their';
+    var isF = /\b(female|woman|women|girl|mtf|she|her|hers)\b/.test(raw);
+    var isM = /\b(male|man|men|boy|ftm|he|him|his)\b/.test(raw);
+    if (isF && !isM) return 'Her';
+    if (isM && !isF) return 'His';
+    return 'Their';
+  }
+  function initModelVideos(m){
+    var sec = document.getElementById('modelVideosSec');
+    var titleEl = document.getElementById('modelVideosTitle');
+    var subEl = document.getElementById('modelVideosSub');
+    var provWrap = document.getElementById('modelVideoProviders');
+    var vgrid = document.getElementById('modelVideosGrid');
+    if (!sec || !vgrid || !window.vxCard) return;
+    var modelName = String((m && m.name) || '').trim();
+    if (!modelName) return;
+    var pronoun = modelPronoun(m);
+    var providers = [], activeId = '', videoReq = 0;
+    function providerLabel(id){
+      for (var i = 0; i < providers.length; i++) if (providers[i].id === id) return providers[i].name || id;
+      return id || 'VexoStream';
+    }
+    function renderProviders(){
+      provWrap.innerHTML = providers.map(function(pv){
+        return '<button type="button" data-pv="' + esc(pv.id) + '" aria-pressed="' + (pv.id === activeId ? 'true' : 'false') + '">' + esc(pv.name || pv.id) + '</button>';
+      }).join('');
+    }
+    function loadVideos(){
+      if (!activeId) return;
+      var rid = ++videoReq;
+      var pvName = providerLabel(activeId);
+      titleEl.textContent = pronoun + ' videos on ' + pvName;
+      subEl.textContent = 'Loading latest 20 videos for ' + modelName + '\u2026';
+      vgrid.innerHTML = window.vxSkeletons ? window.vxSkeletons(8) : '';
+      vgrid.setAttribute('aria-busy', 'true');
+      var collected = [], seen = {};
+      function addItems(list){
+        var usable = window.vxUsable ? window.vxUsable(list) : (Array.isArray(list) ? list : []);
+        for (var i = 0; i < usable.length; i++) {
+          var it = usable[i];
+          var u = window.vxVideoUrl ? window.vxVideoUrl(it) : String(it.url || '');
+          if (!u || seen[u]) continue;
+          seen[u] = 1;
+          if (!it.provider) it.provider = activeId;
+          collected.push(it);
+          if (collected.length >= 20) break;
+        }
+      }
+      function fetchPage(pg){
+        return fetch('/api/explore?q=' + encodeURIComponent(modelName) + '&page=' + pg + '&provider=' + encodeURIComponent(activeId), { headers: { 'X-Edge-Token': TOKEN } })
+          .then(function(r){ if (!r.ok) throw new Error('The server answered ' + r.status + '.'); return r.json(); });
+      }
+      fetchPage(1).then(function(list1){
+        addItems(list1);
+        if (collected.length > 0 && collected.length < 20) {
+          return fetchPage(2).then(function(list2){ addItems(list2); }).catch(function(){});
+        }
+      }).then(function(){
+        if (rid !== videoReq) return;
+        vgrid.innerHTML = '';
+        if (!collected.length) {
+          subEl.textContent = 'No recent videos found on ' + pvName + '.';
+          vgrid.innerHTML = statusHtml('No videos found.', 'Try another provider above.');
+          return;
+        }
+        subEl.textContent = 'Latest ' + collected.length + ' videos for ' + modelName + ' on ' + pvName;
+        var frag = document.createDocumentFragment();
+        collected.forEach(function(it){ frag.appendChild(window.vxCard(it)); });
+        vgrid.appendChild(frag);
+      }).catch(function(err){
+        if (rid !== videoReq) return;
+        subEl.textContent = 'Could not load videos from ' + pvName + '.';
+        vgrid.innerHTML = statusHtml('Couldn\u2019t load videos.', (err && err.message) || 'Try again in a moment.');
+      }).then(function(){
+        if (rid === videoReq) vgrid.removeAttribute('aria-busy');
+      });
+    }
+    provWrap.addEventListener('click', function(e){
+      var b = e.target.closest('button[data-pv]'); if (!b) return;
+      var id = b.getAttribute('data-pv');
+      if (!id || id === activeId) return;
+      activeId = id;
+      renderProviders();
+      loadVideos();
+    });
+    fetch('/api/providers', { headers: { 'X-Edge-Token': TOKEN } })
+      .then(function(r){ return r.ok ? r.json() : null; })
+      .then(function(data){
+        var list = (data && Array.isArray(data.providers) ? data.providers : []).filter(function(pv){ return pv && pv.available !== false && pv.id; });
+        if (!list.length) return;
+        providers = list;
+        var def = String((data && data.default) || '');
+        activeId = providers.some(function(pv){ return pv.id === def; }) ? def : providers[0].id;
+        sec.hidden = false;
+        renderProviders();
+        loadVideos();
+      }).catch(function(){});
+  }
   btnPrev.addEventListener('click', function(){ show(cur - 1); });
   btnNext.addEventListener('click', function(){ show(cur + 1); });
   document.addEventListener('keydown', function(e){

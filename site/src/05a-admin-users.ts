@@ -21,6 +21,7 @@ const ADMIN_PERMISSIONS = [
     { id: 'member_remove', label: 'Delete member accounts', hint: 'Permanently remove member accounts' },
     { id: 'backend', label: 'Backend', hint: 'Change the API server URL' },
     { id: 'providers', label: 'Providers', hint: 'Lock, hide and reorder libraries' },
+    { id: 'default_search', label: 'Default Search Explore', hint: 'Manage rotating default search names and change interval' },
     { id: 'operations', label: 'Operations', hint: 'Repair the database' },
     { id: 'social', label: 'Social media', hint: 'Telegram bot, channel posts and social links' },
     { id: 'users', label: 'Team', hint: 'Add admins and set their permissions' }
