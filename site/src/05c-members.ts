@@ -90,7 +90,7 @@ async function getMemberById(env, id, fresh = false) {
     const c = __memberCache.get(id);
     if (!fresh && c && Date.now() - c.at < 30000) return c.m;
     if (!(await ensureMembersSchema(env))) return null;
-    const m = await env.DB.prepare('SELECT id, username, stamp, disabled, ban_reason, banned_at, created_at, last_login_at FROM members WHERE id = ?').bind(id).first().catch(() => null);
+    const m = await env.DB.prepare('SELECT id, username, stamp, disabled, created_at, last_login_at FROM members WHERE id = ?').bind(id).first().catch(() => null);
     __memberCache.set(id, { at: Date.now(), m: m || null });
     if (__memberCache.size > 2000) __memberCache.delete(__memberCache.keys().next().value);
     return m || null;
@@ -203,9 +203,11 @@ async function handleMembersAdmin(env, form) {
         const isBan = action === 'disable' || action === 'ban';
         const reason = String(form.get('reason') || '').trim().slice(0, 240);
         if (isBan) {
-            await env.DB.prepare('UPDATE members SET disabled = 1, ban_reason = ?, banned_at = CURRENT_TIMESTAMP, stamp = ? WHERE id = ?').bind(reason || null, randomHex(8), id).run();
+            await env.DB.prepare('UPDATE members SET disabled = ?, stamp = ? WHERE id = ?').bind(1, randomHex(8), id).run();
+            if (reason) await env.DB.prepare('UPDATE members SET ban_reason = ?, banned_at = CURRENT_TIMESTAMP WHERE id = ?').bind(reason, id).run().catch(() => null);
         } else {
-            await env.DB.prepare('UPDATE members SET disabled = 0, ban_reason = NULL, banned_at = NULL, stamp = ? WHERE id = ?').bind(randomHex(8), id).run();
+            await env.DB.prepare('UPDATE members SET disabled = ?, stamp = ? WHERE id = ?').bind(0, randomHex(8), id).run();
+            await env.DB.prepare('UPDATE members SET ban_reason = NULL, banned_at = NULL WHERE id = ?').bind(id).run().catch(() => null);
         }
         __memberCache.delete(id);
         return { ok: true, message: m.username + (isBan ? ' was banned and signed out.' : ' was unbanned.') };
