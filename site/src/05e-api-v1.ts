@@ -128,11 +128,11 @@ async function appApiBannedMember(request, env) {
     if (!token || !(await ensureAppApiSessionsSchema(env)) || !(await ensureMembersSchema(env))) return null;
     const tokenHash = await sha256Hex(token);
     const row = await env.DB.prepare(
-        'SELECT m.username, m.disabled, m.ban_reason, m.banned_at ' +
+        'SELECT s.stamp AS session_stamp, m.username, m.stamp AS member_stamp, m.disabled, m.ban_reason, m.banned_at ' +
         'FROM api_sessions s JOIN members m ON m.id = s.member_id ' +
         'WHERE s.token_hash = ? AND s.revoked_at IS NULL'
     ).bind(tokenHash).first().catch(() => null);
-    if (!row || !Number(row.disabled)) return null;
+    if (!row || !Number(row.disabled) || String(row.session_stamp) !== String(row.member_stamp)) return null;
     return { username: String(row.username || ''), reason: String(row.ban_reason || ''), bannedAt: String(row.banned_at || '') };
 }
 
