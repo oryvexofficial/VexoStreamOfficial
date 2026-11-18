@@ -180,6 +180,8 @@ function renderModelsHtml(meta, slug = '') {
         '<p id="modelVideosSub" style="margin:6px 0 0;color:var(--text-2);font:400 14px/1.4 var(--font-sans)"></p></div>' +
         '<div class="segmented" id="modelVideoProviders" role="group" aria-label="Video provider"></div>' +
         '</div>' +
+        '<style>@keyframes vx-spin{to{transform:rotate(360deg)}}.vx-loading-row{display:flex;align-items:center;gap:10px;margin:0 0 16px;color:var(--text-2);font:500 14px/1.4 var(--font-sans)}.vx-loading-row[hidden]{display:none}.vx-spin{width:15px;height:15px;border-radius:50%;border:2px solid var(--line);border-top-color:var(--blue);animation:vx-spin .75s linear infinite}</style>' +
+        '<div id="modelVideosLoading" class="vx-loading-row" hidden><span class="vx-spin" aria-hidden="true"></span><span>Loading&hellip;</span></div>' +
         '<div id="modelVideosGrid" class="vgrid" aria-live="polite"></div>' +
         '<div id="modelVideosMore" hidden style="margin-top:24px;text-align:center">' +
         '<a class="btn quiet" id="modelVideosMoreBtn" href="/search">Load more</a></div>' +
@@ -445,6 +447,7 @@ function MODELS_JS(slug) {
     var subEl = document.getElementById('modelVideosSub');
     var provWrap = document.getElementById('modelVideoProviders');
     var vgrid = document.getElementById('modelVideosGrid');
+    var loadingEl = document.getElementById('modelVideosLoading');
     var moreWrap = document.getElementById('modelVideosMore');
     var moreBtn = document.getElementById('modelVideosMoreBtn');
     if (!sec || !vgrid || !window.vxCard) return;
@@ -469,6 +472,7 @@ function MODELS_JS(slug) {
       subEl.textContent = 'Loading latest 20 videos for ' + modelName + '\u2026';
       vgrid.innerHTML = window.vxSkeletons ? window.vxSkeletons(8) : '';
       vgrid.setAttribute('aria-busy', 'true');
+      if (loadingEl) loadingEl.hidden = false;
       if (moreWrap) moreWrap.hidden = true;
       var collected = [], seen = {};
       function addItems(list){
@@ -514,7 +518,10 @@ function MODELS_JS(slug) {
         subEl.textContent = 'Could not load videos from ' + pvName + '.';
         vgrid.innerHTML = statusHtml('Couldn\u2019t load videos.', (err && err.message) || 'Try again in a moment.');
       }).then(function(){
-        if (rid === videoReq) vgrid.removeAttribute('aria-busy');
+        if (rid === videoReq) {
+          vgrid.removeAttribute('aria-busy');
+          if (loadingEl) loadingEl.hidden = true;
+        }
       });
     }
     provWrap.addEventListener('click', function(e){

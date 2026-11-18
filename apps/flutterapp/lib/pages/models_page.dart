@@ -575,6 +575,14 @@ class _ModelProfilePageState extends State<ModelProfilePage> {
                       ),
                     ),
                     const SizedBox(height: 24),
+                    if (_videosLoading) ...[
+                      Row(children: [
+                        const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+                        const SizedBox(width: 10),
+                        Text('Loading…', style: Vx.sans(size: 14, weight: FontWeight.w500, color: Vx.text2)),
+                      ]),
+                      const SizedBox(height: 16),
+                    ],
                     if (_videosError != null)
                       SizedBox(height: 260, child: ErrorPanel(message: _videosError!, onRetry: _loadVideos))
                     else if (!_videosLoading && _videos.isEmpty)
