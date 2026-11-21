@@ -1473,14 +1473,15 @@ function renderProviderLockedHtml(cfg, id, embed) {
 }
 
 function renderMaintenanceHtml() {
-    return renderHead({ title: 'Be right back \u2014 VexoStream' }) +
-        '<body>' + renderNav('') +
-        '<main class="center-page"><div class="center-box">' +
+    return renderHead({ title: 'Be right back \u2014 VexoStream' }).replace('</head>', '<meta name="robots" content="noindex, nofollow"></head>') +
+        '<body>' +
+        '<main class="center-page" style="min-height:100vh;min-height:100dvh"><div class="center-box">' +
+        '<div class="brand" style="justify-content:center;margin:0 auto 24px"><span class="brand-mark">' + VX_GLYPH + '</span><span class="brand-word">Vexo<b>Stream</b></span></div>' +
         '<div class="maint-icon">' + ICONS.wrench + '</div>' +
         '<h1>We&rsquo;ll be right back.</h1>' +
         '<p>VexoStream is getting a quick tune-up. Check back in a few minutes.</p>' +
         '<div class="center-actions"><a class="btn quiet" href="/status">System status</a></div>' +
-        '</div></main>' + renderFooter() + '<script>' + COMMON_JS + '</script></body></html>';
+        '</div></main></body></html>';
 }
 
 function render404Html() {

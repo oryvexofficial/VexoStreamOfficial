@@ -866,59 +866,75 @@ class _VexoShellState extends State<VexoShell> with WidgetsBindingObserver {
       };
 
   @override
-  Widget build(BuildContext context) => LayoutBuilder(builder: (context, c) {
-        final wide = c.maxWidth >= 1100;
-        final phone = c.maxWidth < 600;
-        return Scaffold(
-          drawer: phone ? Drawer(child: SafeArea(child: _sidebar(true, drawer: true))) : null,
-          body: Column(children: [
-            ColoredBox(
-              color: Vx.bg,
-              child: SafeArea(
-                bottom: false,
-                child: _topBar(wide, phone),
+  Widget build(BuildContext context) => ValueListenableBuilder<SiteSuspensionInfo?>(
+        valueListenable: widget.api.siteSuspension,
+        builder: (context, suspension, _) {
+          if (suspension != null && !_isAdmin) {
+            return Scaffold(
+              backgroundColor: const Color(0xFF05070C),
+              body: SafeArea(
+                child: _SiteSuspendedPage(api: widget.api, info: suspension, onSignIn: () => _openAuth()),
               ),
-            ),
-            Expanded(
-              child: SafeArea(
-                top: false,
-                child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                if (!phone) _sidebar(wide),
-                Expanded(
-                  child: Column(children: [
-                    for (final n in _visibleNotices)
-                      _OwnerNoticeBanner(
-                        key: ValueKey('notice-${n['id'] ?? 'default'}-${n['updatedAt'] ?? 0}'),
-                        notice: n,
-                        onDismiss: n['dismissible'] != false ? () => _dismissNotice(n) : null,
-                        onLinkTap: _openNoticeLink,
+            );
+          }
+          return ValueListenableBuilder<bool>(
+            valueListenable: widget.api.maintenanceMode,
+            builder: (context, maintenance, _) {
+              if (maintenance && !_isAdmin) {
+                return Scaffold(
+                  backgroundColor: Vx.bg,
+                  body: SafeArea(
+                    child: _AppMaintenancePage(api: widget.api, onSignIn: () => _openAuth()),
+                  ),
+                );
+              }
+              return LayoutBuilder(builder: (context, c) {
+                final wide = c.maxWidth >= 1100;
+                final phone = c.maxWidth < 600;
+                return Scaffold(
+                  drawer: phone ? Drawer(child: SafeArea(child: _sidebar(true, drawer: true))) : null,
+                  body: Column(children: [
+                    ColoredBox(
+                      color: Vx.bg,
+                      child: SafeArea(
+                        bottom: false,
+                        child: _topBar(wide, phone),
                       ),
+                    ),
                     Expanded(
-                      child: ValueListenableBuilder<SiteSuspensionInfo?>(
-                        valueListenable: widget.api.siteSuspension,
-                        builder: (context, suspension, _) => suspension != null && !_isAdmin
-                            ? _SiteSuspendedPage(api: widget.api, info: suspension, onSignIn: () => _openAuth())
-                            : ValueListenableBuilder<bool>(
-                                valueListenable: widget.api.maintenanceMode,
-                                builder: (context, maintenance, _) => maintenance && !_isAdmin
-                                    ? _AppMaintenancePage(api: widget.api, onSignIn: () => _openAuth())
-                                    : AnimatedSwitcher(
-                                        duration: const Duration(milliseconds: 260),
-                                        switchInCurve: Vx.ease,
-                                        transitionBuilder: (child, a) => FadeTransition(opacity: a, child: ScaleTransition(scale: Tween(begin: .985, end: 1.0).animate(a), child: child)),
-                                        child: KeyedSubtree(key: ValueKey('${_page.name}-$_browseKey-$_accountKey'), child: _body()),
-                                      ),
+                      child: SafeArea(
+                        top: false,
+                        child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                          if (!phone) _sidebar(wide),
+                          Expanded(
+                            child: Column(children: [
+                              for (final n in _visibleNotices)
+                                _OwnerNoticeBanner(
+                                  key: ValueKey('notice-${n['id'] ?? 'default'}-${n['updatedAt'] ?? 0}'),
+                                  notice: n,
+                                  onDismiss: n['dismissible'] != false ? () => _dismissNotice(n) : null,
+                                  onLinkTap: _openNoticeLink,
+                                ),
+                              Expanded(
+                                child: AnimatedSwitcher(
+                                  duration: const Duration(milliseconds: 260),
+                                  switchInCurve: Vx.ease,
+                                  transitionBuilder: (child, a) => FadeTransition(opacity: a, child: ScaleTransition(scale: Tween(begin: .985, end: 1.0).animate(a), child: child)),
+                                  child: KeyedSubtree(key: ValueKey('${_page.name}-$_browseKey-$_accountKey'), child: _body()),
+                                ),
                               ),
+                            ]),
+                          ),
+                        ]),
                       ),
                     ),
                   ]),
-                ),
-              ]),
-              ),
-            ),
-          ]),
-        );
-      });
+                );
+              });
+            },
+          );
+        },
+      );
 
   Widget _topBar(bool wide, bool phone) => Container(
         height: phone ? 60 : 64,
