@@ -1,0 +1,502 @@
+name: Build VexoStream apps
+
+on:
+  push:
+    branches: [main, master]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    name: Resolve version and release tag
+    runs-on: ubuntu-latest
+    outputs:
+      app_version: ${{ steps.resolve.outputs.app_version }}
+      build_number: ${{ steps.resolve.outputs.build_number }}
+      product_version: ${{ steps.resolve.outputs.product_version }}
+      tag_name: ${{ steps.resolve.outputs.tag_name }}
+      needs_pubspec_sync: ${{ steps.resolve.outputs.needs_pubspec_sync }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Resolve version and auto-bump tag if needed
+        id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: python3 {0}
+        run: |
+          import json
+          import os
+          import re
+          import urllib.error
+          import urllib.request
+
+          pubspec_path = os.path.join("apps", "flutterapp", "pubspec.yaml")
+          with open(pubspec_path, "r", encoding="utf-8") as f:
+              pubspec = f.read()
+
+          m = re.search(r"^version:\s*(\d+\.\d+\.\d+)\+(\d+)\s*$", pubspec, re.MULTILINE)
+          if not m:
+              raise SystemExit("Could not read version from apps/flutterapp/pubspec.yaml")
+
+          base_ver_str = m.group(1)
+          base_ver = tuple(int(x) for x in base_ver_str.split("."))
+          base_build = int(m.group(2))
+
+          event_name = os.environ.get("GITHUB_EVENT_NAME", "")
+          ref_type = os.environ.get("GITHUB_REF_TYPE", "")
+          ref_name = os.environ.get("GITHUB_REF_NAME", "")
+          github_sha = os.environ.get("GITHUB_SHA", "")
+          api_url = os.environ.get("GITHUB_API_URL", "https://api.github.com").rstrip("/")
+          repo = os.environ.get("GITHUB_REPOSITORY", "")
+          token = os.environ.get("GH_TOKEN", "")
+
+          def gh_get(path):
+              req = urllib.request.Request(
+                  f"{api_url}{path}",
+                  headers={
+                      "Authorization": f"Bearer {token}",
+                      "Accept": "application/vnd.github+json",
+                      "User-Agent": "VexoStream-CI",
+                  },
+              )
+              with urllib.request.urlopen(req, timeout=20) as resp:
+                  return json.loads(resp.read().decode("utf-8"))
+
+          def resolve_commit_sha(obj):
+              obj_type = obj.get("type")
+              obj_sha = obj.get("sha")
+              while obj_type == "tag" and obj_sha:
+                  tag_obj = gh_get(f"/repos/{repo}/git/tags/{obj_sha}")
+                  inner = tag_obj.get("object", {})
+                  obj_type = inner.get("type")
+                  obj_sha = inner.get("sha")
+              return obj_type, obj_sha
+
+          selected_ver = base_ver
+          selected_build = base_build
+          tag_name = f"v{base_ver_str}"
+
+          if ref_type == "tag":
+              tag_name = ref_name
+          elif event_name == "push" and ref_type == "branch" and ref_name in ("main", "master") and repo and token:
+              try:
+                  refs = gh_get(f"/repos/{repo}/git/matching-refs/tags/v")
+              except urllib.error.HTTPError as e:
+                  if e.code == 404:
+                      refs = []
+                  else:
+                      raise
+
+              tag_map = {}
+              for item in refs:
+                  ref = item.get("ref", "")
+                  tm = re.match(r"^refs/tags/v(\d+)\.(\d+)\.(\d+)$", ref)
+                  if tm:
+                      ver = (int(tm.group(1)), int(tm.group(2)), int(tm.group(3)))
+                      tag_map[ver] = item.get("object", {})
+
+              if base_ver in tag_map:
+                  obj_type, obj_sha = resolve_commit_sha(tag_map[base_ver])
+                  if obj_type == "commit" and obj_sha == github_sha:
+                      selected_ver = base_ver
+                  else:
+                      max_ver = max([base_ver, *tag_map.keys()])
+                      max_type, max_sha = resolve_commit_sha(tag_map[max_ver]) if max_ver in tag_map else (None, None)
+                      if max_ver > base_ver and max_type == "commit" and max_sha == github_sha:
+                          selected_ver = max_ver
+                      else:
+                          selected_ver = (max_ver[0], max_ver[1], max_ver[2] + 1)
+
+                      if selected_ver[:2] == base_ver[:2]:
+                          selected_build = base_build + max(1, selected_ver[2] - base_ver[2])
+                      else:
+                          selected_build = base_build + 1
+                      tag_name = f"v{selected_ver[0]}.{selected_ver[1]}.{selected_ver[2]}"
+
+          app_version = f"{selected_ver[0]}.{selected_ver[1]}.{selected_ver[2]}"
+          product_version = f"{app_version}.{selected_build}"
+          needs_pubspec_sync = "true" if app_version != base_ver_str else "false"
+
+          print(f"Resolved version={app_version}+{selected_build}, tag={tag_name}, sync={needs_pubspec_sync}")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+              out.write(f"app_version={app_version}\n")
+              out.write(f"build_number={selected_build}\n")
+              out.write(f"product_version={product_version}\n")
+              out.write(f"tag_name={tag_name}\n")
+              out.write(f"needs_pubspec_sync={needs_pubspec_sync}\n")
+
+  website:
+    name: Build and test website Worker
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install website dependencies
+        working-directory: site
+        run: npm install --no-audit --no-fund
+      - name: Build and run website regression tests
+        working-directory: site
+        run: npm test
+
+  android:
+    name: Flutter Android universal APK
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      APP_KEY: ${{ secrets.APP_KEY }}
+    outputs:
+      label: ${{ steps.metadata.outputs.label }}
+      tag_name: ${{ steps.metadata.outputs.tag_name }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Resolve app version and artifact label
+        id: metadata
+        working-directory: apps/flutterapp
+        env:
+          RESOLVED_APP_VERSION: ${{ needs.prepare.outputs.app_version }}
+          RESOLVED_BUILD_NUMBER: ${{ needs.prepare.outputs.build_number }}
+          RESOLVED_PRODUCT_VERSION: ${{ needs.prepare.outputs.product_version }}
+          RESOLVED_TAG_NAME: ${{ needs.prepare.outputs.tag_name }}
+          NEEDS_PUBSPEC_SYNC: ${{ needs.prepare.outputs.needs_pubspec_sync }}
+        shell: bash
+        run: |
+          if [[ "$NEEDS_PUBSPEC_SYNC" == "true" ]]; then
+            sed -i -E "s/^version:[[:space:]]*.*$/version: ${RESOLVED_APP_VERSION}+${RESOLVED_BUILD_NUMBER}/" pubspec.yaml
+          fi
+          if [[ -n "$APP_KEY" ]]; then label="api-ready"; else label="validation-no-app-key"; fi
+          echo "APP_VERSION=$RESOLVED_APP_VERSION" >> "$GITHUB_ENV"
+          echo "tag_name=$RESOLVED_TAG_NAME" >> "$GITHUB_OUTPUT"
+          echo "label=$label" >> "$GITHUB_OUTPUT"
+          echo "TAG_NAME=$RESOLVED_TAG_NAME" >> "$GITHUB_ENV"
+          echo "ARTIFACT_LABEL=$label" >> "$GITHUB_ENV"
+          echo "PRODUCT_VERSION=$RESOLVED_PRODUCT_VERSION" >> "$GITHUB_ENV"
+      - name: Disable Android lintVital for CI
+        run: |
+          mkdir -p ~/.gradle/init.d
+          cat > ~/.gradle/init.d/disable-lint.gradle << 'GRADLE'
+          allprojects {
+            afterEvaluate {
+              tasks.matching { it.name.startsWith("lintVital") || it.name.contains("Lint") }.configureEach {
+                enabled = false
+              }
+            }
+          }
+          GRADLE
+      - name: Generate Android runner
+        working-directory: apps/flutterapp
+        run: bash tool/prepare_android.sh
+      - name: Resolve packages and test
+        working-directory: apps/flutterapp
+        run: |
+          flutter pub get
+          flutter test
+      - name: Build universal APK
+        working-directory: apps/flutterapp
+        shell: bash
+        run: |
+          args=(
+            --release
+            "--dart-define=APP_VERSION=$APP_VERSION"
+            "--dart-define=VEXOSTREAM_GITHUB_REPOSITORY=$GITHUB_REPOSITORY"
+          )
+          if [[ -n "$APP_KEY" ]]; then args+=("--dart-define=APP_KEY=$APP_KEY"); fi
+          flutter build apk "${args[@]}"
+          mkdir -p build/distribution
+          suffix=""
+          if [[ "$ARTIFACT_LABEL" != "api-ready" ]]; then suffix="-$ARTIFACT_LABEL"; fi
+          cp build/app/outputs/flutter-apk/app-release.apk \
+            "build/distribution/VexoStream-$TAG_NAME-Android-universal$suffix.apk"
+          if [[ -n "$APP_KEY" ]]; then
+            printf 'API-ready build. Protected API access is configured at build time.\n' > build/distribution/BUILD-INFO.txt
+          else
+            printf 'VALIDATION BUILD: APP_KEY was not configured. Protected API calls will not work.\n' > build/distribution/BUILD-INFO.txt
+            echo '::warning::Validation build only: APP_KEY is missing, so this artifact cannot use the protected API.'
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: VexoStream-Android-universal-${{ steps.metadata.outputs.label }}-${{ steps.metadata.outputs.tag_name }}
+          path: apps/flutterapp/build/distribution/*
+          if-no-files-found: error
+          retention-days: 30
+
+  windows:
+    name: Flutter Windows app and NSIS installer
+    needs: prepare
+    runs-on: windows-latest
+    timeout-minutes: 60
+    env:
+      APP_KEY: ${{ secrets.APP_KEY }}
+    outputs:
+      label: ${{ steps.metadata.outputs.label }}
+      tag_name: ${{ steps.metadata.outputs.tag_name }}
+      app_version: ${{ steps.metadata.outputs.app_version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Generate Windows runner
+        working-directory: apps/flutterapp
+        shell: pwsh
+        run: |
+          if (!(Test-Path 'windows/CMakeLists.txt')) {
+            flutter create --platforms=windows --project-name=vexostream_app --org=bond.vexostream .
+          }
+      - name: Apply branding and read release metadata
+        id: metadata
+        working-directory: apps/flutterapp
+        env:
+          RESOLVED_APP_VERSION: ${{ needs.prepare.outputs.app_version }}
+          RESOLVED_BUILD_NUMBER: ${{ needs.prepare.outputs.build_number }}
+          RESOLVED_PRODUCT_VERSION: ${{ needs.prepare.outputs.product_version }}
+          RESOLVED_TAG_NAME: ${{ needs.prepare.outputs.tag_name }}
+          NEEDS_PUBSPEC_SYNC: ${{ needs.prepare.outputs.needs_pubspec_sync }}
+        shell: pwsh
+        run: |
+          Copy-Item 'branding/app_icon.ico' 'windows/runner/resources/app_icon.ico' -Force
+          if (Test-Path 'test/widget_test.dart') { Remove-Item 'test/widget_test.dart' -Force }
+          $main = Get-Content 'windows/runner/main.cpp' -Raw
+          $main = $main -replace 'L"vexostream_app"', 'L"VexoStream"'
+          $main = $main -replace 'Win32Window::Size size\(\d+, \d+\);', 'Win32Window::Size size(1360, 860);'
+          Set-Content 'windows/runner/main.cpp' $main -NoNewline
+          $cm = Get-Content 'windows/CMakeLists.txt' -Raw
+          $cm = $cm -replace 'set\(BINARY_NAME "[^"]*"\)', 'set(BINARY_NAME "VexoStream")'
+          if ($cm -notmatch 'target_compile_definitions\(webview_windows_plugin') {
+            $cm += "`r`nif(TARGET webview_windows_plugin)`r`n  target_compile_definitions(webview_windows_plugin PRIVATE _SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS)`r`nendif()`r`n"
+          }
+          Set-Content 'windows/CMakeLists.txt' $cm -NoNewline
+          if ($env:NEEDS_PUBSPEC_SYNC -eq 'true') {
+            $pub = Get-Content 'pubspec.yaml' -Raw
+            $pub = $pub -replace '(?m)^version:\s*.*$', "version: $($env:RESOLVED_APP_VERSION)+$($env:RESOLVED_BUILD_NUMBER)"
+            Set-Content 'pubspec.yaml' $pub -NoNewline
+          }
+          $version = $env:RESOLVED_APP_VERSION
+          $productVersion = $env:RESOLVED_PRODUCT_VERSION
+          $tag = $env:RESOLVED_TAG_NAME
+          $label = if ($env:APP_KEY) { 'api-ready' } else { 'validation-no-app-key' }
+          "APP_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "PRODUCT_VERSION=$productVersion" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "TAG_NAME=$tag" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "ARTIFACT_LABEL=$label" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "app_version=$version" >> $env:GITHUB_OUTPUT
+          "tag_name=$tag" >> $env:GITHUB_OUTPUT
+          "label=$label" >> $env:GITHUB_OUTPUT
+      - name: Resolve Flutter packages
+        working-directory: apps/flutterapp
+        run: flutter pub get
+      - name: Test Flutter
+        working-directory: apps/flutterapp
+        run: flutter test
+      - name: Build Flutter Windows
+        working-directory: apps/flutterapp
+        shell: pwsh
+        run: |
+          $flutterArgs = @(
+            'build', 'windows', '--release',
+            "--dart-define=APP_VERSION=$env:APP_VERSION",
+            "--dart-define=VEXOSTREAM_GITHUB_REPOSITORY=$env:GITHUB_REPOSITORY"
+          )
+          if ($env:APP_KEY) { $flutterArgs += "--dart-define=APP_KEY=$env:APP_KEY" }
+          & flutter @flutterArgs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (!$env:APP_KEY) {
+            Write-Host '::warning::Validation build only: APP_KEY is missing, so this artifact cannot use the protected API.'
+          }
+      - name: Install NSIS
+        run: choco install nsis --yes --no-progress
+      - name: Build portable ZIP and NSIS installer
+        working-directory: apps/flutterapp
+        shell: pwsh
+        run: |
+          $tag = $env:TAG_NAME
+          $suffix = if ($env:ARTIFACT_LABEL -eq 'api-ready') { '' } else { "-$env:ARTIFACT_LABEL" }
+          $dist = Join-Path $PWD 'build/distribution'
+          New-Item -ItemType Directory -Force -Path $dist | Out-Null
+          Get-ChildItem 'installer/VexoStream-*-Setup.exe' -ErrorAction SilentlyContinue | Remove-Item -Force
+          Compress-Archive -Path 'build/windows/x64/runner/Release/*' `
+            -DestinationPath (Join-Path $dist "VexoStream-$tag-Windows-portable$suffix.zip") -Force
+          $makensis = Get-Command makensis.exe -ErrorAction SilentlyContinue
+          if ($makensis) {
+            $makensisPath = $makensis.Source
+          } else {
+            $makensisPath = 'C:\Program Files (x86)\NSIS\makensis.exe'
+          }
+          if (!(Test-Path $makensisPath)) { throw "NSIS compiler not found at $makensisPath" }
+          & $makensisPath "/DPRODUCT_VERSION=$env:PRODUCT_VERSION" 'installer\VexoStream.nsi'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $installer = Get-ChildItem 'installer/VexoStream-*-Setup.exe' | Select-Object -First 1
+          if (!$installer) { throw 'NSIS completed without producing the expected installer beside its script.' }
+          Copy-Item $installer.FullName (Join-Path $dist "VexoStream-$tag-Windows-Setup$suffix.exe") -Force
+          if ($env:APP_KEY) {
+            'API-ready build. Protected API access is configured at build time.' |
+              Set-Content (Join-Path $dist 'BUILD-INFO.txt')
+          } else {
+            'VALIDATION BUILD: APP_KEY was not configured. Protected API calls will not work.' |
+              Set-Content (Join-Path $dist 'BUILD-INFO.txt')
+          }
+      - name: Upload NSIS installer separately
+        uses: actions/upload-artifact@v4
+        with:
+          name: VexoStream-Windows-NSIS-${{ steps.metadata.outputs.label }}-${{ steps.metadata.outputs.tag_name }}
+          path: apps/flutterapp/installer/VexoStream-*-Setup.exe
+          if-no-files-found: error
+          retention-days: 30
+      - name: Upload Windows bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: VexoStream-Windows-bundle-${{ steps.metadata.outputs.label }}-${{ steps.metadata.outputs.tag_name }}
+          path: apps/flutterapp/build/distribution/*
+          if-no-files-found: error
+          retention-days: 30
+
+  release:
+    name: Publish GitHub Release
+    if: >-
+      github.event_name == 'push' &&
+      (
+        github.ref == 'refs/heads/main' ||
+        github.ref == 'refs/heads/master' ||
+        startsWith(github.ref, 'refs/tags/v')
+      )
+    needs: [prepare, website, android, windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      APP_KEY: ${{ secrets.APP_KEY }}
+      RELEASE_TAG: ${{ needs.prepare.outputs.tag_name }}
+    steps:
+      - name: Validate tag matches the app version
+        env:
+          APP_VERSION: ${{ needs.prepare.outputs.app_version }}
+        shell: bash
+        run: |
+          tag_version="${RELEASE_TAG#v}"
+          tag_base="${tag_version%%-*}"
+          if [[ "$tag_base" != "$APP_VERSION" ]]; then
+            echo "Release tag $RELEASE_TAG does not match app version $APP_VERSION." >&2
+            exit 1
+          fi
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "Release tag must use a version tag such as v1.0.0." >&2
+            exit 1
+          fi
+      - name: Ensure automatic release tag exists and is safe
+        id: tag_check
+        if: github.ref_type == 'branch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "should_release=true" >> "$GITHUB_OUTPUT"
+          ref_url="$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG"
+          response_file="$(mktemp)"
+          status="$(curl -sS -o "$response_file" -w '%{http_code}' \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H 'Accept: application/vnd.github+json' \
+            "$ref_url")"
+          if [[ "$status" == "404" ]]; then
+            create_payload="$(jq -nc --arg ref "refs/tags/$RELEASE_TAG" --arg sha "$GITHUB_SHA" '{ref: $ref, sha: $sha}')"
+            create_status="$(curl -sS -o "$response_file" -w '%{http_code}' \
+              -X POST \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H 'Accept: application/vnd.github+json' \
+              -d "$create_payload" \
+              "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/git/refs")"
+            if [[ "$create_status" != "201" ]]; then
+              cat "$response_file" >&2
+              echo "Failed to create tag $RELEASE_TAG (HTTP $create_status)." >&2
+              exit 1
+            fi
+            echo "Created tag $RELEASE_TAG pointing to $GITHUB_SHA."
+            exit 0
+          fi
+          if [[ "$status" != "200" ]]; then
+            cat "$response_file" >&2
+            echo "Could not verify whether tag $RELEASE_TAG already exists (HTTP $status)." >&2
+            exit 1
+          fi
+          object_type="$(jq -r '.object.type' "$response_file")"
+          object_sha="$(jq -r '.object.sha' "$response_file")"
+          while [[ "$object_type" == "tag" ]]; do
+            tag_object="$(curl -fsS \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H 'Accept: application/vnd.github+json' \
+              "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/git/tags/$object_sha")"
+            object_type="$(jq -r '.object.type' <<< "$tag_object")"
+            object_sha="$(jq -r '.object.sha' <<< "$tag_object")"
+          done
+          if [[ "$object_type" != "commit" || "$object_sha" != "$GITHUB_SHA" ]]; then
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Skipping release: tag $RELEASE_TAG already points to a different commit."
+            exit 0
+          fi
+          echo "Tag $RELEASE_TAG already points to this commit; safe to retry the release."
+      - uses: actions/download-artifact@v4
+        if: github.ref_type == 'tag' || steps.tag_check.outputs.should_release == 'true'
+        with:
+          pattern: VexoStream-*-${{ needs.windows.outputs.label }}-${{ needs.prepare.outputs.tag_name }}
+          path: release-input
+          merge-multiple: false
+      - name: Prepare release assets
+        if: github.ref_type == 'tag' || steps.tag_check.outputs.should_release == 'true'
+        env:
+          BUILD_LABEL: ${{ needs.windows.outputs.label }}
+        shell: bash
+        run: |
+          mkdir -p release-assets
+          suffix=""
+          if [[ "$BUILD_LABEL" != "api-ready" ]]; then suffix="-$BUILD_LABEL"; fi
+          tag="$RELEASE_TAG"
+          copy_first() {
+            local name="$1"
+            local destination="$2"
+            local source
+            source="$(find release-input -type f -name "$name" -print -quit)"
+            if [[ -z "$source" ]]; then
+              echo "Required release asset not found: $name" >&2
+              exit 1
+            fi
+            cp "$source" "release-assets/$destination"
+          }
+          copy_first "VexoStream-$tag-Windows-Setup$suffix.exe" "VexoStream-$tag-Windows-Setup$suffix.exe"
+          copy_first "VexoStream-$tag-Windows-portable$suffix.zip" "VexoStream-$tag-Windows-portable$suffix.zip"
+          copy_first "VexoStream-$tag-Android-universal$suffix.apk" "VexoStream-$tag-Android-universal$suffix.apk"
+          if [[ "$BUILD_LABEL" != "api-ready" ]]; then
+            printf '%s\n' \
+              'VALIDATION BUILD: APP_KEY was not configured.' \
+              'The protected VexoStream API cannot be used by these binaries.' \
+              > "release-assets/VexoStream-$tag-VALIDATION-NO-APP_KEY.txt"
+          fi
+      - name: Publish release
+        if: github.ref_type == 'tag' || steps.tag_check.outputs.should_release == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.prepare.outputs.tag_name }}
+          target_commitish: ${{ github.sha }}
+          name: VexoStream ${{ needs.prepare.outputs.tag_name }}
+          body: |
+            VexoStream ${{ needs.prepare.outputs.tag_name }} release.
+            ${{ env.APP_KEY == '' && 'VALIDATION BUILD: APP_KEY is missing. Protected API calls will not work. This release is marked as a pre-release and is excluded from automatic stable update checks.' || 'API-ready build. Windows installer, portable ZIP, and universal Android APK are attached.' }}
+          files: release-assets/*
+          draft: false
+          prerelease: ${{ env.APP_KEY == '' || contains(needs.prepare.outputs.tag_name, '-') }}
+          make_latest: ${{ env.APP_KEY != '' && !contains(needs.prepare.outputs.tag_name, '-') }}
+          fail_on_unmatched_files: true
