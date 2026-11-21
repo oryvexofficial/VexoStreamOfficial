@@ -894,15 +894,20 @@ class _VexoShellState extends State<VexoShell> with WidgetsBindingObserver {
                         onLinkTap: _openNoticeLink,
                       ),
                     Expanded(
-                      child: ValueListenableBuilder<bool>(
-                        valueListenable: widget.api.maintenanceMode,
-                        builder: (context, maintenance, _) => maintenance && !_isAdmin
-                            ? _AppMaintenancePage(api: widget.api, onSignIn: () => _openAuth())
-                            : AnimatedSwitcher(
-                                duration: const Duration(milliseconds: 260),
-                                switchInCurve: Vx.ease,
-                                transitionBuilder: (child, a) => FadeTransition(opacity: a, child: ScaleTransition(scale: Tween(begin: .985, end: 1.0).animate(a), child: child)),
-                                child: KeyedSubtree(key: ValueKey('${_page.name}-$_browseKey-$_accountKey'), child: _body()),
+                      child: ValueListenableBuilder<SiteSuspensionInfo?>(
+                        valueListenable: widget.api.siteSuspension,
+                        builder: (context, suspension, _) => suspension != null && !_isAdmin
+                            ? _SiteSuspendedPage(api: widget.api, info: suspension, onSignIn: () => _openAuth())
+                            : ValueListenableBuilder<bool>(
+                                valueListenable: widget.api.maintenanceMode,
+                                builder: (context, maintenance, _) => maintenance && !_isAdmin
+                                    ? _AppMaintenancePage(api: widget.api, onSignIn: () => _openAuth())
+                                    : AnimatedSwitcher(
+                                        duration: const Duration(milliseconds: 260),
+                                        switchInCurve: Vx.ease,
+                                        transitionBuilder: (child, a) => FadeTransition(opacity: a, child: ScaleTransition(scale: Tween(begin: .985, end: 1.0).animate(a), child: child)),
+                                        child: KeyedSubtree(key: ValueKey('${_page.name}-$_browseKey-$_accountKey'), child: _body()),
+                                      ),
                               ),
                       ),
                     ),
@@ -1090,6 +1095,210 @@ class _NavItemState extends State<_NavItem> {
       ),
     );
     return widget.wide ? tile : Tooltip(message: widget.label, waitDuration: const Duration(milliseconds: 400), child: tile);
+  }
+}
+
+
+class _SiteSuspendedPage extends StatefulWidget {
+  const _SiteSuspendedPage({required this.api, required this.info, this.onSignIn});
+  final VexoApi api;
+  final SiteSuspensionInfo info;
+  final VoidCallback? onSignIn;
+
+  @override
+  State<_SiteSuspendedPage> createState() => _SiteSuspendedPageState();
+}
+
+class _SiteSuspendedPageState extends State<_SiteSuspendedPage> {
+  bool _checking = false;
+
+  String _categoryLabel(String cat) => switch (cat) {
+        'hosting' => 'HOSTING PROVIDER',
+        'legal' => 'LEGAL & COMPLIANCE',
+        'dmca' => 'COPYRIGHT / DMCA',
+        'network' => 'NETWORK OPERATOR',
+        'custom' => 'OFFICIAL NOTICE',
+        _ => 'PLATFORM ADMINISTRATION',
+      };
+
+  String _formatUtc(int ms) {
+    final dt = (ms > 0 ? DateTime.fromMillisecondsSinceEpoch(ms, isUtc: true) : DateTime.now().toUtc());
+    String two(int n) => n.toString().padLeft(2, '0');
+    return '${dt.year}-${two(dt.month)}-${two(dt.day)} ${two(dt.hour)}:${two(dt.minute)}:${two(dt.second)} UTC';
+  }
+
+  Future<void> _retry() async {
+    if (_checking) return;
+    setState(() => _checking = true);
+    try {
+      await widget.api.config();
+    } catch (_) {
+    } finally {
+      if (mounted) setState(() => _checking = false);
+    }
+  }
+
+  Future<void> _openContact() async {
+    final raw = widget.info.contactUrl.trim();
+    if (raw.isEmpty) return;
+    final uri = Uri.tryParse(raw.startsWith('/') ? 'https://${widget.info.host}$raw' : raw);
+    if (uri != null) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    }
+  }
+
+  Widget _docketRow(String label, String value, {bool isRed = false, bool mono = false}) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: const Color(0xFF111622),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+        ),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(label.toUpperCase(), style: Vx.mono(size: 10, color: const Color(0xFF7C8496), weight: FontWeight.w700)),
+          const SizedBox(height: 5),
+          Text(
+            value,
+            style: mono
+                ? Vx.mono(size: 13, color: isRed ? const Color(0xFFF87171) : const Color(0xFFF4F5F8), weight: FontWeight.w600)
+                : TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: isRed ? const Color(0xFFF87171) : const Color(0xFFF4F5F8)),
+          ),
+        ]),
+      );
+
+  @override
+  Widget build(BuildContext context) {
+    final info = widget.info;
+    return Container(
+      decoration: const BoxDecoration(
+        color: Color(0xFF05070C),
+        gradient: RadialGradient(
+          center: Alignment(0, -1.1),
+          radius: 1.15,
+          colors: [Color(0x2EEF4444), Color(0xFF05070C)],
+        ),
+      ),
+      child: Column(children: [
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(colors: [Color(0xFF991B1B), Color(0xFFDC2626), Color(0xFF991B1B)]),
+          ),
+          child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+            Container(width: 8, height: 8, decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle)),
+            const SizedBox(width: 10),
+            Flexible(
+              child: Text(
+                'ACCESS RESTRICTED · OFFICIAL SUSPENSION NOTICE · HTTP ${info.statusCode}',
+                style: Vx.mono(size: 11, color: Colors.white, weight: FontWeight.w700),
+                textAlign: TextAlign.center,
+              ),
+            ),
+          ]),
+        ),
+        Expanded(
+          child: Center(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(20),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 640),
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF0B0E16),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: const Color(0xFFEF4444).withValues(alpha: 0.38)),
+                    boxShadow: const [BoxShadow(color: Color(0x99000000), blurRadius: 48, offset: Offset(0, 20))],
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(26),
+                    child: Column(mainAxisSize: MainAxisSize.min, children: [
+                      Container(
+                        width: 68,
+                        height: 68,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: const Color(0xFFEF4444).withValues(alpha: 0.14),
+                          border: Border.all(color: const Color(0xFFEF4444), width: 2),
+                        ),
+                        child: const Icon(Icons.gpp_maybe_rounded, color: Color(0xFFF87171), size: 34),
+                      ),
+                      const SizedBox(height: 16),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFEF4444).withValues(alpha: 0.14),
+                          borderRadius: BorderRadius.circular(999),
+                          border: Border.all(color: const Color(0xFFEF4444).withValues(alpha: 0.35)),
+                        ),
+                        child: Text(_categoryLabel(info.category), style: Vx.mono(size: 10, color: const Color(0xFFFCA5A5), weight: FontWeight.w700)),
+                      ),
+                      const SizedBox(height: 14),
+                      Text(
+                        info.title.toUpperCase(),
+                        style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w800, color: Colors.white, letterSpacing: -0.6, height: 1.15),
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        info.message,
+                        style: const TextStyle(fontSize: 15, color: Color(0xFFB8BECB), height: 1.55),
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 22),
+                      LayoutBuilder(builder: (context, c) {
+                        final cols = c.maxWidth >= 460 ? 2 : 1;
+                        final cells = <Widget>[
+                          _docketRow('Domain', info.host, mono: true),
+                          _docketRow('Issued By', info.issuer),
+                          _docketRow('Service Status', 'SUSPENDED (HTTP ${info.statusCode})', isRed: true, mono: true),
+                          if (info.referenceId.isNotEmpty) _docketRow('Reference / Case ID', info.referenceId, mono: true),
+                          _docketRow('Effective (UTC)', _formatUtc(info.updatedAt), mono: true),
+                        ];
+                        if (cols == 1) {
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [for (var i = 0; i < cells.length; i++) ...[if (i > 0) const SizedBox(height: 8), cells[i]]],
+                          );
+                        }
+                        return Wrap(
+                          spacing: 10,
+                          runSpacing: 10,
+                          children: cells.map((w) => SizedBox(width: (c.maxWidth - 10) / 2, child: w)).toList(),
+                        );
+                      }),
+                      const SizedBox(height: 22),
+                      Wrap(spacing: 10, runSpacing: 10, alignment: WrapAlignment.center, children: [
+                        if (info.contactUrl.isNotEmpty)
+                          FilledButton.icon(
+                            style: FilledButton.styleFrom(backgroundColor: const Color(0xFFDC2626), foregroundColor: Colors.white),
+                            onPressed: _openContact,
+                            icon: const Icon(Icons.open_in_new_rounded, size: 16),
+                            label: Text(info.contactLabel.isNotEmpty ? info.contactLabel : 'Contact support'),
+                          ),
+                        OutlinedButton.icon(
+                          onPressed: _checking ? null : _retry,
+                          icon: _checking
+                              ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                              : const Icon(Icons.refresh_rounded, size: 16),
+                          label: Text(_checking ? 'Checking…' : 'Retry'),
+                        ),
+                        if (widget.onSignIn != null)
+                          TextButton.icon(
+                            onPressed: widget.onSignIn,
+                            icon: const Icon(Icons.admin_panel_settings_outlined, size: 16),
+                            label: const Text('Admin sign in'),
+                          ),
+                      ]),
+                    ]),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ]),
+    );
   }
 }
 

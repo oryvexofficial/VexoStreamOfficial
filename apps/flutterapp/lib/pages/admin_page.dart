@@ -33,6 +33,7 @@ class _AdminPageState extends State<AdminPage> {
   ];
   static const _permissions = <(String, String)>[
     ('site', 'Site maintenance'),
+    ('site_suspend', 'Site suspension'),
     ('app', 'App maintenance'),
     ('member_settings', 'Member access settings'),
     ('member_moderation', 'Ban and unban members'),
@@ -303,71 +304,6 @@ class _AdminPageState extends State<AdminPage> {
           _noticeLinkUrl.clear();
         }
       });
-    }
-  }, success);
-
-  void _applyDefaultSearchPayload(Map<String, dynamic> payload) {
-    final cfg = asMap(payload['config']);
-    final status = asMap(payload['status']);
-    if (cfg.isEmpty && status.isEmpty) return;
-    _dsEnabled = cfg['enabled'] != false;
-    _dsInterval.text = (cfg['intervalValue'] ?? 1).toString();
-    final unit = (cfg['intervalUnit'] ?? 'days').toString();
-    _dsUnit = const ['minutes', 'hours', 'days'].contains(unit) ? unit : 'days';
-    final names = asList(cfg['names']).map((e) => e.toString()).where((e) => e.trim().isNotEmpty).toList();
-    _dsNames.text = names.join('\n');
-    final activeIdx = asInt(status['activeIndex']);
-    _dsCurrentIdx.text = '${activeIdx + 1}';
-    _dsStatus = status;
-  }
-
-  Future<void> _defaultSearchAction(String action, String success) => _run(() async {
-    final body = <String, dynamic>{'action': action};
-    if (action == 'save') {
-      final iv = int.tryParse(_dsInterval.text.trim()) ?? 1;
-      final idx = int.tryParse(_dsCurrentIdx.text.trim()) ?? 1;
-      body['enabled'] = _dsEnabled;
-      body['intervalValue'] = iv.clamp(1, 10000);
-      body['intervalUnit'] = _dsUnit;
-      body['currentIndex'] = idx < 1 ? 1 : idx;
-      body['namesText'] = _dsNames.text;
-    }
-    final res = asMap(await _post('/admin/default-search', body));
-    final ds = asMap(res['defaultSearch']);
-    if (ds.isNotEmpty && mounted) {
-      setState(() => _applyDefaultSearchPayload(ds));
-    }
-  }, success);
-
-  void _applyNoticePayload(Map<String, dynamic> n) {
-    if (n.isEmpty) return;
-    _noticeEnabled = n['enabled'] == true;
-    _noticeDismissible = n['dismissible'] != false;
-    final tone = (n['tone'] ?? 'info').toString();
-    _noticeTone = const ['info', 'success', 'warning', 'urgent'].contains(tone) ? tone : 'info';
-    _noticeTitle.text = (n['title'] ?? '').toString();
-    _noticeMessage.text = (n['message'] ?? '').toString();
-    _noticeLinkText.text = (n['linkText'] ?? '').toString();
-    _noticeLinkUrl.text = (n['linkUrl'] ?? '').toString();
-  }
-
-  Future<void> _noticeAction(String action, String success) => _run(() async {
-    final body = action == 'clear'
-        ? <String, dynamic>{'action': 'clear'}
-        : <String, dynamic>{
-            'action': 'save',
-            'enabled': _noticeEnabled,
-            'tone': _noticeTone,
-            'title': _noticeTitle.text.trim(),
-            'message': _noticeMessage.text.trim(),
-            'linkText': _noticeLinkText.text.trim(),
-            'linkUrl': _noticeLinkUrl.text.trim(),
-            'dismissible': _noticeDismissible,
-          };
-    final res = asMap(await _post('/admin/notice', body));
-    final n = asMap(res['notice']);
-    if (n.isNotEmpty && mounted) {
-      setState(() => _applyNoticePayload(n));
     }
   }, success);
 

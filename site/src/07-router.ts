@@ -263,6 +263,7 @@ async function handleRequest(request, env, ctx) {
                 }
                 const nextCfg = {
                     enabled: form.get('enabled') === 'on',
+                    applyToApp: form.get('apply_to_app') === 'on',
                     category: String(form.get('category') || 'platform'),
                     issuer: String(form.get('issuer') || ''),
                     title: String(form.get('title') || ''),
@@ -478,10 +479,20 @@ async function handleRequest(request, env, ctx) {
                     appFlow = !!(route && (route.appMode || ref.searchParams.get('app_player') === '1'));
                 } catch (_) {}
             }
-            if (!appFlow) {
-                const suspendCfg = await getSiteSuspensionConfig(env);
-                if (suspendCfg.enabled && !(await verifyAdminSession(request, env))) {
-                    if (path.startsWith('/api/')) return appApiJson({ status: 'error', error: suspendCfg.title, code: 'site_suspended' }, suspendCfg.statusCode, { 'Cache-Control': 'no-store' });
+            const suspendCfg = await getSiteSuspensionConfig(env);
+            if (suspendCfg.enabled && (!appFlow || suspendCfg.applyToApp)) {
+                const appLoginAllowed = path === APP_API_PREFIX + '/auth/login';
+                const appOwner = isAppApiPath ? await appApiAdmin(request, env) : null;
+                const appAdminEmbedAllowed = await appAdminEmbedMaintenanceGrant(request, url);
+                if (!appLoginAllowed && !(await verifyAdminSession(request, env)) && !appOwner && !appAdminEmbedAllowed) {
+                    if (path.startsWith('/api/')) {
+                        return appApiJson({
+                            status: 'error',
+                            error: suspendCfg.title,
+                            code: 'site_suspended',
+                            suspension: { ...suspendCfg, host: url.hostname }
+                        }, suspendCfg.statusCode, { 'Cache-Control': 'no-store' });
+                    }
                     return htmlResponse(renderSiteSuspendedHtml(suspendCfg, url.hostname), suspendCfg.statusCode, { ...SECURE_HTML_HEADERS, 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex, nofollow' });
                 }
             }

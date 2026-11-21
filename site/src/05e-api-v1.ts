@@ -210,6 +210,10 @@ async function handleAppApiV1(request, url, env, ctx) {
             else {
                 const admin = await authenticateAdmin(env, username, password);
                 if (admin) result = { ok: true, admin };
+                else if ((await getSiteSuspensionConfig(env)).enabled && (await getSiteSuspensionConfig(env)).applyToApp) {
+                    const sCfg = await getSiteSuspensionConfig(env);
+                    return appApiJson({ error: sCfg.title, code: 'site_suspended', suspension: { ...sCfg, host: url.hostname } }, sCfg.statusCode, { 'Cache-Control': 'no-store' });
+                }
                 else if (await isAppMaintenanceOn(env)) return appApiJson({ error: 'VexoStream is under maintenance. Only admins can sign in right now.', code: 'maintenance' }, 503, { 'Retry-After': '3600' });
                 else result = await loginMember(env, username, password);
             }
@@ -288,6 +292,7 @@ async function handleAppApiV1(request, url, env, ctx) {
             const out: any = { owner: { username: admin.username, role: admin.owner ? 'Owner' : 'Admin', isOwner: !!admin.owner, permissions: admin.permissions || [], legacy: !!admin.legacy } };
             if (adminCan(admin, 'site')) { out.siteMaintenanceOn = await isSiteMaintenanceOn(env); out.maintenanceOn = out.siteMaintenanceOn; }
             if (adminCan(admin, 'app')) out.appMaintenanceOn = await isAppMaintenanceOn(env);
+            if (adminCan(admin, 'site_suspend')) out.siteSuspension = await getSiteSuspensionConfig(env, true);
             if (adminCan(admin, 'member_settings') || adminCan(admin, 'member_moderation') || adminCan(admin, 'member_remove')) {
                 out.members = {};
                 if (adminCan(admin, 'member_settings')) out.members.config = await getMembersConfig(env, true);
@@ -322,7 +327,7 @@ async function handleAppApiV1(request, url, env, ctx) {
         const values = body.value;
         if (path === '/admin/settings') {
             // Reject the entire request before writing anything if any field is unauthorized.
-            const fieldPermissions = { defaultQuery: 'providers', defaultProvider: 'providers', lockMessage: 'providers', providerOrder: 'providers', providerModes: 'providers', backendUrl: 'backend', maintenanceOn: 'owner', siteMaintenanceOn: 'site', appMaintenanceOn: 'app', members: 'member_settings', live: 'owner' };
+            const fieldPermissions = { defaultQuery: 'providers', defaultProvider: 'providers', lockMessage: 'providers', providerOrder: 'providers', providerModes: 'providers', backendUrl: 'backend', maintenanceOn: 'owner', siteMaintenanceOn: 'site', appMaintenanceOn: 'app', siteSuspension: 'site_suspend', members: 'member_settings', live: 'owner' };
             for (const key of Object.keys(values)) {
                 const perm = fieldPermissions[key];
                 if (!perm || (perm === 'owner' ? !admin.owner : !adminCan(admin, perm))) return appApiJson({ error: 'Permission denied for setting: ' + key, code: 'forbidden' }, 403);
@@ -347,6 +352,7 @@ async function handleAppApiV1(request, url, env, ctx) {
             if (Object.prototype.hasOwnProperty.call(values, 'maintenanceOn') && !(await setMaintenance(env, values.maintenanceOn))) return appApiJson({ error: 'Could not save legacy maintenance mode; check each service setting.' }, 503);
             if (Object.prototype.hasOwnProperty.call(values, 'siteMaintenanceOn') && !(await setSiteMaintenance(env, values.siteMaintenanceOn))) return appApiJson({ error: 'Could not save website maintenance.' }, 503);
             if (Object.prototype.hasOwnProperty.call(values, 'appMaintenanceOn') && !(await setAppMaintenance(env, values.appMaintenanceOn))) return appApiJson({ error: 'Could not save app maintenance.' }, 503);
+            if (values.siteSuspension && typeof values.siteSuspension === 'object' && !(await saveSiteSuspensionConfig(env, { ...(await getSiteSuspensionConfig(env, true)), ...values.siteSuspension }))) return appApiJson({ error: 'Could not save site suspension settings.' }, 503);
             if (values.members && typeof values.members === 'object' && !(await saveMembersConfig(env, values.members))) return appApiJson({ error: 'Could not save member settings.' }, 503);
             if (values.live && typeof values.live === 'object' && !(await saveLiveConfig(env, { ...(await getLiveConfig(env, true)), ...values.live }))) return appApiJson({ error: 'Could not save live viewer settings.' }, 503);
             if (admin.owner) {

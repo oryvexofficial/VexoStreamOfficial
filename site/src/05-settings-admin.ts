@@ -711,6 +711,7 @@ function normalizeSiteSuspensionConfig(raw) {
     const statusCode = Number(o.statusCode) === 451 ? 451 : 503;
     return {
         enabled: !!o.enabled,
+        applyToApp: !!o.applyToApp,
         category,
         issuer: cleanStr(o.issuer, 120) || preset.issuer,
         title: cleanStr(o.title, 160) || preset.title,
@@ -1254,11 +1255,14 @@ function renderSiteSuspensionCard(sCfg) {
         ? '<span class="hpill bad"><i></i>Site suspended (HTTP ' + cfg.statusCode + ')</span>'
         : '<span class="hpill"><i style="--c:var(--green)"></i>Site active</span>';
     return '<section class="card span" id="suspension-card">' +
-        '<div class="card-head"><div><div class="card-kicker">SITE SUSPENSION</div><h2>Website suspension notice</h2><p>Replace the public website with a formal suspension page while keeping Owner and Admin access active. Does not affect the native app.</p></div>' +
+        '<div class="card-head"><div><div class="card-kicker">SITE SUSPENSION</div><h2>Website suspension notice</h2><p>Display the official suspension page across the public website and optionally the native app while keeping Owner and Admin access active.</p></div>' +
         '<div class="health">' + pill + '</div></div>' +
         '<form method="POST" action="' + ADMIN_PATH + '/suspension" class="live-form">' +
         '<div class="live-top">' +
+        '<div style="display:flex;flex-wrap:wrap;gap:14px 22px;align-items:center">' +
         '<label class="live-toggle"><input type="checkbox" name="enabled" value="on"' + (cfg.enabled ? ' checked' : '') + '><span>Suspend public website</span></label>' +
+        '<label class="live-toggle"><input type="checkbox" name="apply_to_app" value="on"' + (cfg.applyToApp ? ' checked' : '') + '><span>Also suspend native app</span></label>' +
+        '</div>' +
         '<div class="links"><a class="btn quiet sm" href="' + ADMIN_PATH + '/suspension/preview" target="_blank" rel="noopener">Preview page</a></div>' +
         '</div>' +
         '<div class="prov-opts">' +
@@ -1282,48 +1286,68 @@ function renderSiteSuspendedHtml(sCfg, host = 'vexostream.bond') {
     const cfg = normalizeSiteSuspensionConfig(sCfg);
     const preset = SITE_SUSPEND_PRESETS[cfg.category] || SITE_SUSPEND_PRESETS.platform;
     const stamp = cfg.updatedAt ? new Date(cfg.updatedAt).toISOString().replace('T', ' ').slice(0, 19) + ' UTC' : new Date().toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
-    const shieldIcon = '<svg viewBox="0 0 24 24" width="34" height="34" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M12 8v4"/><path d="M12 16h.01"/></svg>';
+    const sealSvg = '<svg viewBox="0 0 80 80" width="68" height="68" fill="none" aria-hidden="true">' +
+        '<circle cx="40" cy="40" r="36" stroke="#ef4444" stroke-opacity=".35" stroke-width="1.5" stroke-dasharray="4 4"/>' +
+        '<circle cx="40" cy="40" r="29" fill="rgba(239,68,68,.12)" stroke="#ef4444" stroke-width="2"/>' +
+        '<path d="M40 19l15 6v13c0 10.2-6.4 18.8-15 22-8.6-3.2-15-11.8-15-22V25l15-6z" fill="rgba(239,68,68,.16)" stroke="#f87171" stroke-width="2.2" stroke-linejoin="round"/>' +
+        '<path d="M40 31v11" stroke="#ffffff" stroke-width="2.8" stroke-linecap="round"/>' +
+        '<circle cx="40" cy="48.5" r="1.8" fill="#ffffff"/>' +
+        '</svg>';
     const isExt = /^https?:\/\//i.test(cfg.contactUrl);
     const cta = cfg.contactUrl
-        ? '<a class="btn" href="' + escapeHtml(cfg.contactUrl) + '"' + (isExt ? ' target="_blank" rel="noopener"' : '') + '>' + escapeHtml(cfg.contactLabel || 'Contact support') + '</a>'
+        ? '<a class="susp-cta" href="' + escapeHtml(cfg.contactUrl) + '"' + (isExt ? ' target="_blank" rel="noopener"' : '') + '>' + escapeHtml(cfg.contactLabel || 'Contact support') + '</a>'
         : '';
-    const refRow = cfg.referenceId
-        ? '<div class="susp-row"><span>Reference ID</span><b class="mono">' + escapeHtml(cfg.referenceId) + '</b></div>'
+    const refCell = cfg.referenceId
+        ? '<div class="susp-cell"><span>Reference / Case ID</span><b class="mono">' + escapeHtml(cfg.referenceId) + '</b></div>'
         : '';
-    return renderHead({ title: cfg.title + ' — ' + escapeHtml(host) }).replace('</head>', '<meta name="robots" content="noindex, nofollow"><style>' +
-        '.susp-wrap{flex:1;display:flex;align-items:center;justify-content:center;padding:48px 16px;min-height:100vh;min-height:100dvh;background:var(--bg)}' +
-        '.susp-card{width:100%;max-width:640px;border-radius:20px;border:1px solid rgba(var(--red-rgb),.35);background:var(--panel);box-shadow:0 24px 64px rgba(0,0,0,.45);overflow:hidden}' +
-        '.susp-bar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:14px 24px;background:rgba(var(--red-rgb),.12);border-bottom:1px solid rgba(var(--red-rgb),.24);font:600 12px/1 var(--font-mono);letter-spacing:.08em;text-transform:uppercase;color:var(--red)}' +
-        '.susp-bar-l{display:inline-flex;align-items:center;gap:8px}' +
-        '.susp-bar-l i{width:8px;height:8px;border-radius:50%;background:var(--red);display:inline-block}' +
-        '.susp-body{padding:32px 28px 28px}' +
-        '.susp-ico{width:64px;height:64px;border-radius:16px;display:flex;align-items:center;justify-content:center;background:rgba(var(--red-rgb),.14);border:1px solid rgba(var(--red-rgb),.32);color:var(--red);margin-bottom:20px}' +
-        '.susp-kicker{margin:0 0 8px;font:600 12px/1.2 var(--font-mono);letter-spacing:.1em;text-transform:uppercase;color:var(--text-3)}' +
-        '.susp-card h1{margin:0 0 12px;font-size:clamp(26px,4vw,34px);font-weight:700;letter-spacing:-.03em;line-height:1.12;color:var(--text)}' +
-        '.susp-msg{margin:0 0 24px;font-size:16px;line-height:1.6;color:var(--text-2);white-space:pre-line}' +
-        '.susp-meta{display:grid;gap:1px;border-radius:14px;overflow:hidden;border:1px solid var(--line);background:var(--line);margin-bottom:24px}' +
-        '.susp-row{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;padding:12px 16px;background:var(--well);font-size:14px}' +
-        '.susp-row span{color:var(--text-3);font-weight:500}' +
-        '.susp-row b{color:var(--text);font-weight:600;text-align:right;overflow-wrap:anywhere}' +
-        '.susp-actions{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;padding-top:16px;border-top:1px solid var(--line)}' +
-        '.susp-foot{font-size:12px;color:var(--text-3);font-family:var(--font-mono)}' +
-        '@media(max-width:520px){.susp-body{padding:24px 18px 20px}.susp-row{flex-direction:column;align-items:flex-start;gap:4px}.susp-row b{text-align:left}}' +
+    const scopeText = cfg.applyToApp ? 'Website & Native App' : 'Public Website';
+    return renderHead({ title: cfg.title + ' \u2014 ' + escapeHtml(host) }).replace('</head>', '<meta name="robots" content="noindex, nofollow"><style>' +
+        'body.susp-body-root{margin:0;min-height:100vh;min-height:100dvh;background:#05070c;background-image:radial-gradient(ellipse 80% 50% at 50% -10%,rgba(239,68,68,.18),transparent 70%);color:#f4f5f8;display:flex;flex-direction:column;font-family:var(--font-sans)}' +
+        '.susp-ribbon{width:100%;background:#b91c1c;background-image:linear-gradient(90deg,#991b1b 0%,#dc2626 50%,#991b1b 100%);border-bottom:1px solid rgba(255,255,255,.18);color:#ffffff;padding:11px 20px;font:700 12px/1.2 var(--font-mono);letter-spacing:.14em;text-transform:uppercase;display:flex;align-items:center;justify-content:center;gap:14px;text-align:center}' +
+        '.susp-ribbon-dot{width:8px;height:8px;border-radius:50%;background:#ffffff;box-shadow:0 0 0 3px rgba(255,255,255,.28);display:inline-block;flex:none}' +
+        '.susp-stage{flex:1;display:flex;align-items:center;justify-content:center;padding:36px 16px 48px}' +
+        '.susp-shell{width:100%;max-width:740px;border-radius:20px;border:1px solid rgba(239,68,68,.38);background:#0b0e16;box-shadow:0 32px 90px rgba(0,0,0,.68),0 0 0 1px rgba(255,255,255,.04) inset;overflow:hidden}' +
+        '.susp-head{padding:36px 32px 28px;text-align:center;border-bottom:1px solid rgba(255,255,255,.08);background:linear-gradient(180deg,rgba(239,68,68,.10) 0%,rgba(11,14,22,0) 100%)}' +
+        '.susp-seal{display:inline-flex;align-items:center;justify-content:center;margin:0 auto 18px}' +
+        '.susp-tag{display:inline-flex;align-items:center;gap:8px;padding:6px 14px;border-radius:999px;background:rgba(239,68,68,.14);border:1px solid rgba(239,68,68,.36);color:#fca5a5;font:700 11px/1 var(--font-mono);letter-spacing:.12em;text-transform:uppercase;margin-bottom:16px}' +
+        '.susp-head h1{margin:0 auto 14px;max-width:22ch;font-size:clamp(26px,4.4vw,40px);font-weight:800;letter-spacing:-.035em;line-height:1.08;color:#ffffff;text-transform:uppercase}' +
+        '.susp-msg{margin:0 auto;max-width:56ch;font-size:16px;line-height:1.65;color:#b8becb;white-space:pre-line;unicode-bidi:plaintext}' +
+        '.susp-docket{padding:26px 32px 30px}' +
+        '.susp-docket-title{margin:0 0 14px;font:700 11px/1 var(--font-mono);letter-spacing:.14em;text-transform:uppercase;color:#7c8496}' +
+        '.susp-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}' +
+        '.susp-cell{padding:14px 16px;border-radius:12px;border:1px solid rgba(255,255,255,.08);background:#111622;min-width:0}' +
+        '.susp-cell span{display:block;font:600 11px/1.2 var(--font-mono);letter-spacing:.08em;text-transform:uppercase;color:#7c8496;margin-bottom:6px}' +
+        '.susp-cell b{display:block;font-size:14.5px;font-weight:600;color:#f4f5f8;overflow-wrap:anywhere}' +
+        '.susp-cell b.is-red{color:#f87171}' +
+        '.susp-foot{margin-top:22px;padding-top:18px;border-top:1px solid rgba(255,255,255,.08);display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap}' +
+        '.susp-brand-mini{display:inline-flex;align-items:center;gap:8px;color:#7c8496;font:600 12px/1 var(--font-mono);letter-spacing:.06em}' +
+        '.susp-cta{display:inline-flex;align-items:center;justify-content:center;min-height:40px;padding:0 20px;border-radius:999px;background:#dc2626;color:#ffffff;font:600 14px/1 var(--font-sans);text-decoration:none;transition:background-color .2s ease}' +
+        '.susp-cta:hover{background:#b91c1c;text-decoration:none}' +
+        '@media(max-width:600px){.susp-head{padding:28px 20px 22px}.susp-docket{padding:20px}.susp-grid{grid-template-columns:minmax(0,1fr)}.susp-ribbon{font-size:11px;letter-spacing:.09em}}' +
         '</style></head>') +
-        '<body><main class="susp-wrap"><section class="susp-card" role="alert" aria-labelledby="suspTitle">' +
-        '<div class="susp-bar"><span class="susp-bar-l"><i></i>Notice of Suspension</span><span>HTTP ' + cfg.statusCode + '</span></div>' +
-        '<div class="susp-body">' +
-        '<div class="susp-ico">' + shieldIcon + '</div>' +
-        '<p class="susp-kicker">' + escapeHtml(preset.label) + '</p>' +
-        '<h1 id="suspTitle">' + escapeHtml(cfg.title) + '</h1>' +
-        '<p class="susp-msg">' + escapeHtml(cfg.message) + '</p>' +
-        '<div class="susp-meta">' +
-        '<div class="susp-row"><span>Domain</span><b class="mono">' + escapeHtml(host) + '</b></div>' +
-        '<div class="susp-row"><span>Issued by</span><b>' + escapeHtml(cfg.issuer) + '</b></div>' +
-        '<div class="susp-row"><span>Status</span><b style="color:var(--red)">Suspended</b></div>' +
-        refRow +
-        '<div class="susp-row"><span>Updated</span><b class="mono">' + escapeHtml(stamp) + '</b></div>' +
+        '<body class="susp-body-root">' +
+        '<div class="susp-ribbon"><span class="susp-ribbon-dot"></span><span>Access Restricted &middot; Official Suspension Notice &middot; HTTP ' + cfg.statusCode + '</span></div>' +
+        '<main class="susp-stage"><section class="susp-shell" role="alert" aria-labelledby="suspTitle">' +
+        '<div class="susp-head">' +
+        '<div class="susp-seal">' + sealSvg + '</div>' +
+        '<div><span class="susp-tag">' + escapeHtml(preset.label) + '</span></div>' +
+        '<h1 id="suspTitle" dir="auto">' + escapeHtml(cfg.title) + '</h1>' +
+        '<p class="susp-msg" dir="auto">' + escapeHtml(cfg.message) + '</p>' +
         '</div>' +
-        '<div class="susp-actions"><span class="susp-foot">Status code: ' + cfg.statusCode + '</span>' + (cta ? '<div>' + cta + '</div>' : '') + '</div>' +
+        '<div class="susp-docket">' +
+        '<p class="susp-docket-title">Notice Details</p>' +
+        '<div class="susp-grid">' +
+        '<div class="susp-cell"><span>Domain</span><b class="mono">' + escapeHtml(host) + '</b></div>' +
+        '<div class="susp-cell"><span>Issued By</span><b dir="auto">' + escapeHtml(cfg.issuer) + '</b></div>' +
+        '<div class="susp-cell"><span>Service Status</span><b class="is-red">SUSPENDED (HTTP ' + cfg.statusCode + ')</b></div>' +
+        '<div class="susp-cell"><span>Scope</span><b>' + escapeHtml(scopeText) + '</b></div>' +
+        refCell +
+        '<div class="susp-cell"><span>Effective (UTC)</span><b class="mono">' + escapeHtml(stamp) + '</b></div>' +
+        '</div>' +
+        '<div class="susp-foot">' +
+        '<span class="susp-brand-mini"><span class="brand-mark" style="width:22px;height:22px;border-radius:6px">' + VX_GLYPH + '</span><span>VEXOSTREAM EDGE GATEWAY</span></span>' +
+        (cta ? cta : '') +
+        '</div>' +
         '</div></section></main></body></html>';
 }
 

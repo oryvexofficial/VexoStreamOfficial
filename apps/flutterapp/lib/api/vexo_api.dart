@@ -20,6 +20,52 @@ class BannedAccountInfo {
   final String message;
 }
 
+
+class SiteSuspensionInfo {
+  const SiteSuspensionInfo({
+    required this.category,
+    required this.issuer,
+    required this.title,
+    required this.message,
+    required this.referenceId,
+    required this.contactUrl,
+    required this.contactLabel,
+    required this.statusCode,
+    required this.updatedAt,
+    required this.host,
+  });
+
+  final String category;
+  final String issuer;
+  final String title;
+  final String message;
+  final String referenceId;
+  final String contactUrl;
+  final String contactLabel;
+  final int statusCode;
+  final int updatedAt;
+  final String host;
+
+  factory SiteSuspensionInfo.fromMap(Map<dynamic, dynamic> map, {int? fallbackStatus, String? fallbackTitle}) {
+    final rawStatus = map['statusCode'];
+    final status = rawStatus is int ? rawStatus : int.tryParse('${rawStatus ?? ''}') ?? fallbackStatus ?? 503;
+    final rawUpdated = map['updatedAt'];
+    final updated = rawUpdated is int ? rawUpdated : int.tryParse('${rawUpdated ?? ''}') ?? 0;
+    return SiteSuspensionInfo(
+      category: (map['category'] ?? 'platform').toString(),
+      issuer: (map['issuer'] ?? 'VexoStream Administration').toString(),
+      title: (map['title'] ?? fallbackTitle ?? 'This service has been suspended.').toString(),
+      message: (map['message'] ?? 'Public access is currently suspended pending review.').toString(),
+      referenceId: (map['referenceId'] ?? '').toString(),
+      contactUrl: (map['contactUrl'] ?? '').toString(),
+      contactLabel: (map['contactLabel'] ?? 'Contact support').toString(),
+      statusCode: status == 451 ? 451 : 503,
+      updatedAt: updated,
+      host: (map['host'] ?? 'vexostream.bond').toString(),
+    );
+  }
+}
+
 class ApiException implements Exception {
   const ApiException(
     this.message, {
@@ -86,6 +132,7 @@ class VexoApi {
   final http.Client _client;
   final ValueNotifier<bool> maintenanceMode = ValueNotifier(false);
   final ValueNotifier<BannedAccountInfo?> bannedAccount = ValueNotifier(null);
+  final ValueNotifier<SiteSuspensionInfo?> siteSuspension = ValueNotifier(null);
   String? _token;
   int _baseIndex = 0;
 
@@ -211,6 +258,7 @@ class VexoApi {
       final path = response.request?.url.path ?? '';
       if (path.endsWith('/account') || path.endsWith('/config') || path.endsWith('/providers')) {
         maintenanceMode.value = false;
+        siteSuspension.value = null;
       }
       return data;
     }
@@ -219,6 +267,14 @@ class VexoApi {
       var message = (map['error'] ?? map['message'] ?? map['detail'] ?? '').toString();
       final code = (map['code'] ?? '').toString();
       if (response.statusCode == 503 && code == 'maintenance') maintenanceMode.value = true;
+      if (code == 'site_suspended') {
+        final rawSusp = map['suspension'];
+        siteSuspension.value = SiteSuspensionInfo.fromMap(
+          rawSusp is Map ? rawSusp : const <String, dynamic>{},
+          fallbackStatus: response.statusCode,
+          fallbackTitle: message.isNotEmpty ? message : null,
+        );
+      }
       if (code == 'account_banned') {
         final info = BannedAccountInfo(
           username: (map['username'] ?? '').toString(),
@@ -331,6 +387,7 @@ class VexoApi {
   void close() {
     _client.close();
     maintenanceMode.dispose();
+    siteSuspension.dispose();
   }
 }
 
