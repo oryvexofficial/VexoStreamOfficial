@@ -15,26 +15,17 @@
 
 ## Site Screenshots
 
-| Home (`/`) | Browse &amp; Search (`/browse`, `/search`) |
-| :---: | :---: |
-| ![VexoStream Home](docs/screenshots/home.png) | ![VexoStream Browse](docs/screenshots/browse.png) |
+| Home (`/`) | Browse &amp; Search (`/browse`, `/search`) | Video Player (`/video`, `/embed`) |
+| :---: | :---: | :---: |
+| ![VexoStream Home](docs/screenshots/home.png) | ![VexoStream Browse](docs/screenshots/browse.png) | ![VexoStream Player](docs/screenshots/player.png) |
 
-| Video Player (`/video`, `/embed`) | OnlyFans Models (`/models`) |
-| :---: | :---: |
-| ![VexoStream Player](docs/screenshots/player.png) | ![VexoStream Models](docs/screenshots/models.png) |
+| OnlyFans Models (`/models`) | System Status (`/status`) | Check Host (`/check-host`) |
+| :---: | :---: | :---: |
+| ![VexoStream Models](docs/screenshots/models.png) | ![VexoStream Status](docs/screenshots/status.png) | ![VexoStream Check Host](docs/screenshots/check-host.png) |
 
-| System Status (`/status`) | Check Host (`/check-host`) |
-| :---: | :---: |
-| ![VexoStream Status](docs/screenshots/status.png) | ![VexoStream Check Host](docs/screenshots/check-host.png) |
-
-| Developers &amp; Embed (`/developers`) | Social Media (`/social`) |
-| :---: | :---: |
-| ![VexoStream Developers](docs/screenshots/developers.png) | ![VexoStream Social](docs/screenshots/social.png) |
-
-| Member Login &amp; Sign Up (`/login`, `/signup`) | Admin Control Plane (`/adminpanel`) |
-| :---: | :---: |
-| ![VexoStream Auth](docs/screenshots/auth.png) | ![VexoStream Admin](docs/screenshots/admin.png) |
-
+| Developers &amp; Embed (`/developers`) | Social Media (`/social`) | Member Login &amp; Sign Up (`/login`, `/signup`) |
+| :---: | :---: | :---: |
+| ![VexoStream Developers](docs/screenshots/developers.png) | ![VexoStream Social](docs/screenshots/social.png) | ![VexoStream Auth](docs/screenshots/auth.png) |
 ---
 
 ## Highlights

@@ -188,7 +188,14 @@ async function handleRequest(request, env, ctx) {
                 const members = (adminCan(user, 'member_settings') || adminCan(user, 'member_moderation') || adminCan(user, 'member_remove')) ? { cfg: adminCan(user, 'member_settings') ? await getMembersConfig(env, true) : null, list: (adminCan(user, 'member_moderation') || adminCan(user, 'member_remove')) ? await listMembers(env, 25) : null } : null;
                 const defaultSearch = adminCan(user, 'default_search') ? await (async () => { const dsCfg = await getDefaultSearchConfig(env, true); return { cfg: dsCfg, status: resolveDefaultSearchStatus(dsCfg) }; })() : null;
                 const noticeCfg = adminCan(user, 'notice') ? await getNoticeConfig(env, true) : null;
-                return htmlResponse(renderAdminPanelHtml(user, maint, url.searchParams.get('flash') || '', cfg, health, url.searchParams.get('err') === '1', await getBackendUrl(env, true), team, telegram, live, social, members, appMaint, defaultSearch, noticeCfg), 200, adminHtmlHeaders());
+                const suspendCfg = adminCan(user, 'site_suspend') ? await getSiteSuspensionConfig(env, true) : null;
+                return htmlResponse(renderAdminPanelHtml(user, maint, url.searchParams.get('flash') || '', cfg, health, url.searchParams.get('err') === '1', await getBackendUrl(env, true), team, telegram, live, social, members, appMaint, defaultSearch, noticeCfg, suspendCfg), 200, adminHtmlHeaders());
+            }
+            if (path === ADMIN_PATH + '/suspension/preview' && request.method === 'GET') {
+                const user = await verifyAdminSession(request, env);
+                if (!user || !adminCan(user, 'site_suspend')) return redirect(ADMIN_PATH);
+                const sCfg = await getSiteSuspensionConfig(env, true);
+                return htmlResponse(renderSiteSuspendedHtml(sCfg, url.hostname), 200, adminHtmlHeaders());
             }
             if (path === ADMIN_PATH + '/live/stats' && request.method === 'GET') {
                 const user = await verifyAdminSession(request, env);
@@ -243,6 +250,30 @@ async function handleRequest(request, env, ctx) {
                 else if (action === 'remove') { res = await removeAdminAccount(env, user, name); msg = res.ok ? res.username + ' was removed.' : ''; }
                 else return htmlResponse(render404Html(), 404, adminHtmlHeaders());
                 return back(res.ok ? msg : res.error, res.ok, 'team');
+            }
+            if (path === ADMIN_PATH + '/suspension') {
+                if (!adminCan(user, 'site_suspend')) return deny('site suspension');
+                const form = await readForm();
+                if (!form) return back('Could not read the suspension form.', false, 'suspension');
+                const action = String(form.get('action') || 'save');
+                const cur = await getSiteSuspensionConfig(env, true);
+                if (action === 'lift') {
+                    const wrote = await saveSiteSuspensionConfig(env, { ...cur, enabled: false });
+                    return back(wrote ? 'Site suspension lifted. The website is live again.' : 'Could not update site suspension. ' + (__dbError || 'D1 write error.'), wrote, 'suspension');
+                }
+                const nextCfg = {
+                    enabled: form.get('enabled') === 'on',
+                    category: String(form.get('category') || 'platform'),
+                    issuer: String(form.get('issuer') || ''),
+                    title: String(form.get('title') || ''),
+                    message: String(form.get('message') || ''),
+                    referenceId: String(form.get('reference_id') || ''),
+                    contactUrl: String(form.get('contact_url') || ''),
+                    contactLabel: String(form.get('contact_label') || ''),
+                    statusCode: Number(form.get('status_code')) === 451 ? 451 : 503
+                };
+                const wrote = await saveSiteSuspensionConfig(env, nextCfg);
+                return back(wrote ? (nextCfg.enabled ? 'Site suspension is now active.' : 'Site suspension settings saved (currently inactive).') : 'Could not save site suspension. ' + (__dbError || 'D1 write error.'), wrote, 'suspension');
             }
             if (path === ADMIN_PATH + '/toggle') {
                 if (!adminCan(user, 'site')) return deny('site mode');
@@ -446,6 +477,13 @@ async function handleRequest(request, env, ctx) {
                     const route = ref.origin === url.origin ? embedRouteInfo(ref.pathname) : null;
                     appFlow = !!(route && (route.appMode || ref.searchParams.get('app_player') === '1'));
                 } catch (_) {}
+            }
+            if (!appFlow) {
+                const suspendCfg = await getSiteSuspensionConfig(env);
+                if (suspendCfg.enabled && !(await verifyAdminSession(request, env))) {
+                    if (path.startsWith('/api/')) return appApiJson({ status: 'error', error: suspendCfg.title, code: 'site_suspended' }, suspendCfg.statusCode, { 'Cache-Control': 'no-store' });
+                    return htmlResponse(renderSiteSuspendedHtml(suspendCfg, url.hostname), suspendCfg.statusCode, { ...SECURE_HTML_HEADERS, 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex, nofollow' });
+                }
             }
             const maintenanceOn = appFlow ? await isAppMaintenanceOn(env) : await isSiteMaintenanceOn(env);
             if (maintenanceOn) {

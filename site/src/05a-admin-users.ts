@@ -15,6 +15,7 @@
 // ============================================================================
 const ADMIN_PERMISSIONS = [
     { id: 'site', label: 'Site maintenance', hint: 'Turn website maintenance on or off' },
+    { id: 'site_suspend', label: 'Site suspension', hint: 'Suspend the public website with a formal suspension notice page' },
     { id: 'app', label: 'App maintenance', hint: 'Turn app maintenance on or off' },
     { id: 'member_settings', label: 'Member access settings', hint: 'Control signup and member login rules' },
     { id: 'member_moderation', label: 'Ban and unban members', hint: 'Disable or re-enable member accounts' },

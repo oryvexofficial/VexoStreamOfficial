@@ -650,6 +650,95 @@ function publicNoticeOf(cfg) {
     return list.length ? list[0] : null;
 }
 
+
+// ============================================================================
+// SITE SUSPENSION NOTICE (Owner-only by default, grantable via site_suspend)
+// ============================================================================
+const SITE_SUSPEND_PRESETS = {
+    platform: {
+        label: 'Platform Administration',
+        issuer: 'VexoStream Administration',
+        title: 'This website has been suspended.',
+        message: 'Public access to this domain is currently suspended by platform administration pending review.',
+        statusCode: 503
+    },
+    hosting: {
+        label: 'Hosting Provider',
+        issuer: 'Hosting Infrastructure Provider',
+        title: 'Service temporarily suspended.',
+        message: 'This website has been suspended by its hosting provider due to an active service or account review.',
+        statusCode: 503
+    },
+    legal: {
+        label: 'Legal & Compliance',
+        issuer: 'Legal & Compliance Department',
+        title: 'Unavailable for legal or compliance reasons.',
+        message: 'Access to this website has been restricted pursuant to an active compliance or regulatory review.',
+        statusCode: 451
+    },
+    dmca: {
+        label: 'Copyright / DMCA',
+        issuer: 'Copyright & DMCA Compliance Desk',
+        title: 'Access restricted due to a copyright notice.',
+        message: 'Public access to this website is suspended while a copyright or DMCA takedown notice is being processed.',
+        statusCode: 451
+    },
+    network: {
+        label: 'Network Operator',
+        issuer: 'Edge Network Operations',
+        title: 'Domain routing suspended.',
+        message: 'Traffic to this domain has been suspended at the edge network layer until further notice.',
+        statusCode: 503
+    },
+    custom: {
+        label: 'Custom Notice',
+        issuer: 'Site Administrator',
+        title: 'This website has been suspended.',
+        message: 'Public access to this website is currently suspended. Please contact the administrator for more information.',
+        statusCode: 503
+    }
+};
+
+let __siteSuspend: { at: number; cfg: any } = { at: 0, cfg: null };
+
+function normalizeSiteSuspensionConfig(raw) {
+    const o = raw && typeof raw === 'object' ? raw : {};
+    const category = Object.prototype.hasOwnProperty.call(SITE_SUSPEND_PRESETS, o.category) ? String(o.category) : 'platform';
+    const preset = SITE_SUSPEND_PRESETS[category];
+    const cleanStr = (v, max) => String(v == null ? '' : v).replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '').trim().slice(0, max);
+    const contactUrlRaw = cleanStr(o.contactUrl, 240);
+    const contactUrl = /^(https?:\/\/|mailto:|\/[a-zA-Z0-9_\-/?=&%#.]+$)/i.test(contactUrlRaw) ? contactUrlRaw : '';
+    const statusCode = Number(o.statusCode) === 451 ? 451 : 503;
+    return {
+        enabled: !!o.enabled,
+        category,
+        issuer: cleanStr(o.issuer, 120) || preset.issuer,
+        title: cleanStr(o.title, 160) || preset.title,
+        message: cleanStr(o.message, 800) || preset.message,
+        referenceId: cleanStr(o.referenceId, 64),
+        contactUrl,
+        contactLabel: cleanStr(o.contactLabel, 48) || 'Contact support',
+        statusCode,
+        updatedAt: Number(o.updatedAt) > 0 ? Number(o.updatedAt) : 0
+    };
+}
+
+async function getSiteSuspensionConfig(env, fresh = false) {
+    if (!fresh && __siteSuspend.cfg && Date.now() - __siteSuspend.at < 15000) return __siteSuspend.cfg;
+    let raw = null;
+    try { raw = JSON.parse(await dbGetSetting(env, 'site_suspension_config', 'null')); } catch (_) {}
+    const cfg = normalizeSiteSuspensionConfig(raw);
+    __siteSuspend = { at: Date.now(), cfg };
+    return cfg;
+}
+
+async function saveSiteSuspensionConfig(env, cfg) {
+    const clean = normalizeSiteSuspensionConfig({ ...cfg, updatedAt: Date.now() });
+    const ok = await dbSetSetting(env, 'site_suspension_config', JSON.stringify(clean));
+    if (ok) __siteSuspend = { at: Date.now(), cfg: clean };
+    return ok;
+}
+
 function providerList(cfg) {
     return cfg.order.map(id => PROVIDERS.find(p => p.id === id)).filter(Boolean).map(p => ({ ...p, mode: cfg.modes[p.id] || 'live' }));
 }
@@ -1151,6 +1240,93 @@ function renderBackendCard(backendUrl) {
         '<form method="POST" action="' + ADMIN_PATH + '/backend" class="backend-reset"><input type="hidden" name="action" value="reset"><button class="btn quiet sm" type="submit">Reset to Worker variable</button></form></section>';
 }
 
+
+function renderSiteSuspensionCard(sCfg) {
+    const cfg = normalizeSiteSuspensionConfig(sCfg);
+    const catOpts = Object.keys(SITE_SUSPEND_PRESETS).map(k =>
+        '<option value="' + k + '"' + (cfg.category === k ? ' selected' : '') + '>' + escapeHtml(SITE_SUSPEND_PRESETS[k].label) + '</option>'
+    ).join('');
+    const codeOpts = [
+        [503, '503 Service Unavailable'],
+        [451, '451 Unavailable For Legal Reasons']
+    ].map(c => '<option value="' + c[0] + '"' + (cfg.statusCode === c[0] ? ' selected' : '') + '>' + c[1] + '</option>').join('');
+    const pill = cfg.enabled
+        ? '<span class="hpill bad"><i></i>Site suspended (HTTP ' + cfg.statusCode + ')</span>'
+        : '<span class="hpill"><i style="--c:var(--green)"></i>Site active</span>';
+    return '<section class="card span" id="suspension-card">' +
+        '<div class="card-head"><div><div class="card-kicker">SITE SUSPENSION</div><h2>Website suspension notice</h2><p>Replace the public website with a formal suspension page while keeping Owner and Admin access active. Does not affect the native app.</p></div>' +
+        '<div class="health">' + pill + '</div></div>' +
+        '<form method="POST" action="' + ADMIN_PATH + '/suspension" class="live-form">' +
+        '<div class="live-top">' +
+        '<label class="live-toggle"><input type="checkbox" name="enabled" value="on"' + (cfg.enabled ? ' checked' : '') + '><span>Suspend public website</span></label>' +
+        '<div class="links"><a class="btn quiet sm" href="' + ADMIN_PATH + '/suspension/preview" target="_blank" rel="noopener">Preview page</a></div>' +
+        '</div>' +
+        '<div class="prov-opts">' +
+        '<label class="opt"><span>Notice category</span><select name="category">' + catOpts + '</select></label>' +
+        '<label class="opt"><span>HTTP status code</span><select name="status_code">' + codeOpts + '</select></label>' +
+        '<label class="opt"><span>Issued by / Provider</span><input name="issuer" maxlength="120" value="' + escapeHtml(cfg.issuer) + '" placeholder="e.g. Hosting Infrastructure Provider" autocomplete="off"></label>' +
+        '<label class="opt"><span>Reference / Case ID (optional)</span><input name="reference_id" maxlength="64" value="' + escapeHtml(cfg.referenceId) + '" placeholder="e.g. REF-2026-0412" autocomplete="off"></label>' +
+        '<label class="opt span"><span>Headline</span><input name="title" maxlength="160" value="' + escapeHtml(cfg.title) + '" placeholder="This website has been suspended." autocomplete="off"></label>' +
+        '<label class="opt span"><span>Suspension message</span><textarea name="message" maxlength="800" rows="3" placeholder="Explain why public access is suspended...">' + escapeHtml(cfg.message) + '</textarea></label>' +
+        '<label class="opt"><span>Contact / Appeal URL (optional)</span><input name="contact_url" maxlength="240" value="' + escapeHtml(cfg.contactUrl) + '" placeholder="https://... or mailto:abuse@example.com" autocomplete="off"></label>' +
+        '<label class="opt"><span>Button label</span><input name="contact_label" maxlength="48" value="' + escapeHtml(cfg.contactLabel) + '" placeholder="Contact support" autocomplete="off"></label>' +
+        '</div>' +
+        '<p class="backend-note">Signed-in admins bypass this screen and can lift the suspension at any time. For legal/compliance integrity, use accurate organization details rather than impersonating third-party brands or law enforcement.</p>' +
+        '<div class="actions-row" style="gap:8px">' +
+        (cfg.enabled ? '<button class="btn quiet sm" type="submit" name="action" value="lift">Lift suspension</button>' : '') +
+        '<button class="btn danger sm" type="submit" name="action" value="save">' + (cfg.enabled ? 'Update suspension' : 'Save suspension settings') + '</button>' +
+        '</div></form></section>';
+}
+
+function renderSiteSuspendedHtml(sCfg, host = 'vexostream.bond') {
+    const cfg = normalizeSiteSuspensionConfig(sCfg);
+    const preset = SITE_SUSPEND_PRESETS[cfg.category] || SITE_SUSPEND_PRESETS.platform;
+    const stamp = cfg.updatedAt ? new Date(cfg.updatedAt).toISOString().replace('T', ' ').slice(0, 19) + ' UTC' : new Date().toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
+    const shieldIcon = '<svg viewBox="0 0 24 24" width="34" height="34" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M12 8v4"/><path d="M12 16h.01"/></svg>';
+    const isExt = /^https?:\/\//i.test(cfg.contactUrl);
+    const cta = cfg.contactUrl
+        ? '<a class="btn" href="' + escapeHtml(cfg.contactUrl) + '"' + (isExt ? ' target="_blank" rel="noopener"' : '') + '>' + escapeHtml(cfg.contactLabel || 'Contact support') + '</a>'
+        : '';
+    const refRow = cfg.referenceId
+        ? '<div class="susp-row"><span>Reference ID</span><b class="mono">' + escapeHtml(cfg.referenceId) + '</b></div>'
+        : '';
+    return renderHead({ title: cfg.title + ' — ' + escapeHtml(host) }).replace('</head>', '<meta name="robots" content="noindex, nofollow"><style>' +
+        '.susp-wrap{flex:1;display:flex;align-items:center;justify-content:center;padding:48px 16px;min-height:100vh;min-height:100dvh;background:var(--bg)}' +
+        '.susp-card{width:100%;max-width:640px;border-radius:20px;border:1px solid rgba(var(--red-rgb),.35);background:var(--panel);box-shadow:0 24px 64px rgba(0,0,0,.45);overflow:hidden}' +
+        '.susp-bar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:14px 24px;background:rgba(var(--red-rgb),.12);border-bottom:1px solid rgba(var(--red-rgb),.24);font:600 12px/1 var(--font-mono);letter-spacing:.08em;text-transform:uppercase;color:var(--red)}' +
+        '.susp-bar-l{display:inline-flex;align-items:center;gap:8px}' +
+        '.susp-bar-l i{width:8px;height:8px;border-radius:50%;background:var(--red);display:inline-block}' +
+        '.susp-body{padding:32px 28px 28px}' +
+        '.susp-ico{width:64px;height:64px;border-radius:16px;display:flex;align-items:center;justify-content:center;background:rgba(var(--red-rgb),.14);border:1px solid rgba(var(--red-rgb),.32);color:var(--red);margin-bottom:20px}' +
+        '.susp-kicker{margin:0 0 8px;font:600 12px/1.2 var(--font-mono);letter-spacing:.1em;text-transform:uppercase;color:var(--text-3)}' +
+        '.susp-card h1{margin:0 0 12px;font-size:clamp(26px,4vw,34px);font-weight:700;letter-spacing:-.03em;line-height:1.12;color:var(--text)}' +
+        '.susp-msg{margin:0 0 24px;font-size:16px;line-height:1.6;color:var(--text-2);white-space:pre-line}' +
+        '.susp-meta{display:grid;gap:1px;border-radius:14px;overflow:hidden;border:1px solid var(--line);background:var(--line);margin-bottom:24px}' +
+        '.susp-row{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;padding:12px 16px;background:var(--well);font-size:14px}' +
+        '.susp-row span{color:var(--text-3);font-weight:500}' +
+        '.susp-row b{color:var(--text);font-weight:600;text-align:right;overflow-wrap:anywhere}' +
+        '.susp-actions{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;padding-top:16px;border-top:1px solid var(--line)}' +
+        '.susp-foot{font-size:12px;color:var(--text-3);font-family:var(--font-mono)}' +
+        '@media(max-width:520px){.susp-body{padding:24px 18px 20px}.susp-row{flex-direction:column;align-items:flex-start;gap:4px}.susp-row b{text-align:left}}' +
+        '</style></head>') +
+        '<body><main class="susp-wrap"><section class="susp-card" role="alert" aria-labelledby="suspTitle">' +
+        '<div class="susp-bar"><span class="susp-bar-l"><i></i>Notice of Suspension</span><span>HTTP ' + cfg.statusCode + '</span></div>' +
+        '<div class="susp-body">' +
+        '<div class="susp-ico">' + shieldIcon + '</div>' +
+        '<p class="susp-kicker">' + escapeHtml(preset.label) + '</p>' +
+        '<h1 id="suspTitle">' + escapeHtml(cfg.title) + '</h1>' +
+        '<p class="susp-msg">' + escapeHtml(cfg.message) + '</p>' +
+        '<div class="susp-meta">' +
+        '<div class="susp-row"><span>Domain</span><b class="mono">' + escapeHtml(host) + '</b></div>' +
+        '<div class="susp-row"><span>Issued by</span><b>' + escapeHtml(cfg.issuer) + '</b></div>' +
+        '<div class="susp-row"><span>Status</span><b style="color:var(--red)">Suspended</b></div>' +
+        refRow +
+        '<div class="susp-row"><span>Updated</span><b class="mono">' + escapeHtml(stamp) + '</b></div>' +
+        '</div>' +
+        '<div class="susp-actions"><span class="susp-foot">Status code: ' + cfg.statusCode + '</span>' + (cta ? '<div>' + cta + '</div>' : '') + '</div>' +
+        '</div></section></main></body></html>';
+}
+
 function renderDatabaseCard(health) {
     const pill = (ok, label) => '<span class="hpill' + (ok ? '' : ' bad') + '"><i></i>' + label + '</span>';
     return '<section class="card"><h2>Database</h2><p>Settings live in D1 (binding <b>DB</b>). Repair creates or upgrades the settings table and tests a write.</p>' +
@@ -1212,7 +1388,7 @@ const ADMIN_JS = String.raw`
 })();
 `;
 
-function renderAdminPanelHtml(user, maintenanceOn, flashMsg, cfg = normalizeProviderConfig(null), health = { binding: true, table: true, write: null, error: '' }, flashErr = false, backendUrl = BACKEND_URL_BASE, team = null, telegram = null, live = null, social = null, members = null, appMaintenanceOn = false, defaultSearch = null, noticeCfg = null) {
+function renderAdminPanelHtml(user, maintenanceOn, flashMsg, cfg = normalizeProviderConfig(null), health = { binding: true, table: true, write: null, error: '' }, flashErr = false, backendUrl = BACKEND_URL_BASE, team = null, telegram = null, live = null, social = null, members = null, appMaintenanceOn = false, defaultSearch = null, noticeCfg = null, suspendCfg = null) {
     const section = (id, title, detail, cards) => '<section class="admin-section" id="' + id + '"><div class="section-head"><div><h2>' + title + '</h2><p>' + detail + '</p></div></div><div class="cards">' + cards + '</div></section>';
     const can = (perm) => adminCan(user, perm);
     const siteMode = '<section class="card span"><div class="card-kicker">PUBLIC SITE</div><h2>Site mode</h2><p>Website maintenance is independent of the app. Signed-in admins retain access.</p>' +
@@ -1235,6 +1411,7 @@ function renderAdminPanelHtml(user, maintenanceOn, flashMsg, cfg = normalizeProv
     add('account', 'Account', 'Your account', 'Change your password and see what you can manage.', renderAccountCard(user) + '<section class="card"><div class="card-kicker">ACCESS</div><h2>What you can manage</h2><p>' + (user.owner ? 'You own this site, so you can manage everything.' : 'Ask the owner (' + escapeHtml(ownerName()) + ') if you need more.') + '</p>' + permChecks('perm_view', user.permissions, { lockAll: true }) + '</section>');
     if (can('users')) add('team', 'Team', 'Team &amp; permissions', user.owner ? 'Add admins, choose what each one can manage, reset or remove them.' : 'Add admins and set their permissions. Only the owner can grant Team.', renderTeamCards(user, team));
     if (can('site') || can('app')) add('overview', 'Maintenance', 'Maintenance', 'Control the website and app independently.', (can('site') ? siteMode : '') + (can('app') ? appMode : ''));
+    if (can('site_suspend')) add('suspension', 'Suspension', 'Site suspension', 'Suspend public access to the website with a formal suspension notice page.', renderSiteSuspensionCard(suspendCfg));
     if (members) add('members', 'Members', 'Members', 'Visitor accounts and “log in to watch”.', renderMembersCard(members.cfg, members.list, user));
     if (can('backend')) add('backend', 'Backend', 'Backend', 'Set the API server this Worker forwards requests to.', renderBackendCard(backendUrl));
     if (can('providers')) add('providers', 'Providers', 'Providers', 'Choose what visitors can browse and set the default search experience.', renderProvidersCard(cfg));
