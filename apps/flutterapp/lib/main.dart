@@ -1131,7 +1131,7 @@ class _SiteSuspendedPageState extends State<_SiteSuspendedPage> {
     if (_checking) return;
     setState(() => _checking = true);
     try {
-      await widget.api.config();
+      await widget.api.get('/config');
     } catch (_) {
     } finally {
       if (mounted) setState(() => _checking = false);
